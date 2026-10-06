@@ -1,5 +1,5 @@
 // service-worker.js — app shell caching for offline + installability
-const CACHE_NAME = 'fitness-tracker-v1';
+const CACHE_NAME = 'fitness-tracker-v2';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -12,6 +12,13 @@ const PRECACHE_URLS = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
+  './images/p2_1.png', './images/p2_2.png', './images/p2_3.png', './images/p2_4.png',
+  './images/p3_1.png', './images/p3_2.png', './images/p3_3.png',
+  './images/p4_1.png', './images/p4_2.png', './images/p4_3.png',
+  './images/p5_1.png', './images/p5_2.png', './images/p5_3.png', './images/p5_4.png',
+  './images/p6_1.png', './images/p6_2.png',
+  './images/p7_1.png', './images/p7_2.png', './images/p7_3.png',
+  './images/p8_1.png', './images/p8_2.png', './images/p8_3.png',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js',
 ];
 

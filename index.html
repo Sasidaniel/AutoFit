@@ -90,6 +90,10 @@
       <label class="field-label">יעד אימונים בשבוע</label>
       <input type="number" id="settingWeeklyGoal" class="input" min="1" max="7" step="1">
 
+      <label class="field-label">שבוע תוכנית נוכחי (קובע כמה סטים ברירת מחדל לכל תרגיל)</label>
+      <input type="number" id="settingProgramWeek" class="input" min="1" max="20" step="1">
+      <div class="field-hint">שבוע 1 = סט אחד לתרגיל, שבוע 2 = שני סטים, שבוע 3 ואילך = מלא (לפי הגדרת התרגיל). השינוי חל מיד על האימון הנוכחי ועל אימונים חדשים.</div>
+
       <div class="settings-actions">
         <button id="btnExportData" class="btn btn-secondary">ייצוא גיבוי (JSON)</button>
         <button id="btnImportData" class="btn btn-secondary">ייבוא גיבוי</button>

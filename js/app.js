@@ -35,6 +35,17 @@ function init() {
   if (!exercises.length) {
     exercises = SEED_EXERCISES.map((e) => ({ id: db.uid(), ...e }));
     db.saveExercises(exercises);
+  } else {
+    // migrate older saved exercises that don't have an images field yet
+    let migrated = false;
+    exercises.forEach((ex) => {
+      if (!ex.images) {
+        const match = SEED_EXERCISES.find((s) => s.name === ex.name);
+        ex.images = match ? match.images : [];
+        migrated = true;
+      }
+    });
+    if (migrated) db.saveExercises(exercises);
   }
   if (!activeSession) {
     activeSession = buildDraftSession();
@@ -108,7 +119,7 @@ function buildDraftSession() {
     entries: exercises.map((ex) => ({
       exerciseId: ex.id,
       exerciseName: ex.name,
-      sets: Array.from({ length: ex.defaultSets || 1 }, (_, i) => {
+      sets: Array.from({ length: setsForWeek(ex) }, (_, i) => {
         const last = lastByExercise[ex.id];
         return {
           weightKg: last ? last.weightKg : '',
@@ -118,6 +129,31 @@ function buildDraftSession() {
       }),
     })),
   };
+}
+
+function setsForWeek(ex) {
+  const week = Math.max(1, Number(settings.programWeek) || 1);
+  return Math.max(1, Math.min(week, ex.defaultSets || 1));
+}
+
+function applyProgramWeekToActiveSession() {
+  if (!activeSession) return;
+  activeSession.entries.forEach((entry) => {
+    const ex = exercises.find((e) => e.id === entry.exerciseId);
+    if (!ex) return;
+    const desired = setsForWeek(ex);
+    while (entry.sets.length < desired) {
+      const last = entry.sets.at(-1);
+      entry.sets.push({ weightKg: last ? last.weightKg : '', reps: last ? last.reps : '', completed: false });
+    }
+    while (entry.sets.length > desired) {
+      const last = entry.sets.at(-1);
+      if (last.completed) break; // never discard a logged set
+      entry.sets.pop();
+    }
+  });
+  persistActiveSession();
+  renderWorkoutTab();
 }
 
 function getLastCompletedValuesByExercise() {
@@ -217,8 +253,14 @@ function renderWorkoutTab() {
         <div class="exercise-name">${escapeHtml(ex.name)}</div>
         <div class="exercise-meta">${escapeHtml(ex.defaultReps)} חזרות &middot; ${escapeHtml(ex.notes || '')}</div>
       </div>
-      <span class="exercise-category-tag">${escapeHtml(ex.category)}</span>
+      <div class="exercise-head-right">
+        <span class="exercise-category-tag">${escapeHtml(ex.category)}</span>
+        ${ex.images && ex.images.length ? '<button class="btn-photo btnShowPhoto">📷 תמונה</button>' : ''}
+      </div>
     `;
+    if (ex.images && ex.images.length) {
+      qs('.btnShowPhoto', head).addEventListener('click', () => openPhotoModal(ex));
+    }
     card.appendChild(head);
 
     const table = document.createElement('table');
@@ -398,6 +440,7 @@ function renderStatsGrid() {
   const weekCount = countThisWeek();
 
   const stats = [
+    { label: 'שבוע תוכנית נוכחי', value: settings.programWeek || 1 },
     { label: 'סה"כ אימונים', value: totalWorkouts },
     { label: 'נפח כולל (ק"ג)', value: Math.round(totalVolume).toLocaleString() },
     { label: 'זמן ממוצע', value: formatHMS(avgDuration) },
@@ -531,11 +574,18 @@ function renderExercisesTab() {
   list.innerHTML = '';
   exercises.forEach((ex) => {
     const item = document.createElement('div');
-    item.className = 'exercise-manage-item';
+    item.className = 'exercise-manage-item sortable-item';
+    item.dataset.id = ex.id;
     item.innerHTML = `
       <div class="exercise-manage-head">
-        <b>${escapeHtml(ex.name)}</b>
-        <button class="btn-icon btnDeleteEx">🗑️</button>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="drag-handle" title="גרור לשינוי סדר">⠿</span>
+          <b>${escapeHtml(ex.name)}</b>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;">
+          ${ex.images && ex.images.length ? '<button class="btn-icon btnShowPhotoManage">📷</button>' : ''}
+          <button class="btn-icon btnDeleteEx">🗑️</button>
+        </div>
       </div>
       <div class="exercise-manage-fields">
         <div class="full"><label class="field-label">שם התרגיל</label><input class="input fName" value="${escapeAttr(ex.name)}"></div>
@@ -563,8 +613,81 @@ function renderExercisesTab() {
       db.saveExercises(exercises);
       renderExercisesTab();
     });
+    const photoBtnManage = qs('.btnShowPhotoManage', item);
+    if (photoBtnManage) photoBtnManage.addEventListener('click', () => openPhotoModal(ex));
     list.appendChild(item);
   });
+  makeSortable(list, (newOrderIds) => {
+    const byId = Object.fromEntries(exercises.map((e) => [e.id, e]));
+    exercises = newOrderIds.map((id) => byId[id]).filter(Boolean);
+    db.saveExercises(exercises);
+    reorderActiveSessionToMatchExercises();
+  });
+}
+
+/* ---- drag-to-reorder (pointer events, touch-friendly for iPhone) ---- */
+function makeSortable(listEl, onReorder) {
+  listEl.addEventListener('pointerdown', (e) => {
+    const handle = e.target.closest('.drag-handle');
+    if (!handle) return;
+    const dragEl = handle.closest('.sortable-item');
+    if (!dragEl) return;
+    e.preventDefault();
+    dragEl.setPointerCapture(e.pointerId);
+    dragEl.classList.add('dragging');
+
+    const onMove = (ev) => {
+      const y = ev.clientY;
+      const siblings = qsa('.sortable-item', listEl).filter((s) => s !== dragEl);
+      let next = null;
+      for (const sib of siblings) {
+        const rect = sib.getBoundingClientRect();
+        if (y < rect.top + rect.height / 2) { next = sib; break; }
+      }
+      if (next) listEl.insertBefore(dragEl, next);
+      else listEl.appendChild(dragEl);
+    };
+    const onUp = () => {
+      dragEl.classList.remove('dragging');
+      try { dragEl.releasePointerCapture(e.pointerId); } catch (err) { /* noop */ }
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      const newOrder = qsa('.sortable-item', listEl).map((x) => x.dataset.id);
+      onReorder(newOrder);
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  });
+}
+
+function reorderActiveSessionToMatchExercises() {
+  if (!activeSession) return;
+  const byExId = Object.fromEntries(activeSession.entries.map((e) => [e.exerciseId, e]));
+  const reordered = exercises.map((ex) => byExId[ex.id]).filter(Boolean);
+  // keep any orphan entries (exercise was deleted) at the end so data isn't lost
+  const orphan = activeSession.entries.filter((e) => !exercises.some((ex) => ex.id === e.exerciseId));
+  activeSession.entries = [...reordered, ...orphan];
+  persistActiveSession();
+  renderWorkoutTab();
+}
+
+/* ---- photo modal ---- */
+function openPhotoModal(ex) {
+  if (!ex.images || !ex.images.length) { showToast('אין תמונה לתרגיל זה'); return; }
+  const overlay = document.createElement('div');
+  overlay.className = 'photo-overlay';
+  overlay.innerHTML = `
+    <div class="photo-modal">
+      <div class="photo-modal-head"><b>${escapeHtml(ex.name)}</b><button class="btn-icon btnClosePhoto">✕</button></div>
+      <div class="photo-grid">
+        ${ex.images.map((src) => `<img src="${src}" alt="${escapeAttr(ex.name)}" loading="lazy">`).join('')}
+      </div>
+      ${ex.images.length > 1 ? '<div class="photo-caption">יש כמה אפשרויות ביצוע — בחרו לפי מה שזמין באולם</div>' : ''}
+    </div>
+  `;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  qs('.btnClosePhoto', overlay).addEventListener('click', () => overlay.remove());
+  document.body.appendChild(overlay);
 }
 
 /* ================= SETTINGS TAB ================= */
@@ -576,6 +699,12 @@ function wireSettings() {
   el('settingWeeklyGoal').addEventListener('change', (e) => {
     settings.weeklyGoal = Math.max(1, Number(e.target.value) || 3);
     db.saveSettings(settings);
+  });
+  el('settingProgramWeek').addEventListener('change', (e) => {
+    settings.programWeek = Math.max(1, Number(e.target.value) || 1);
+    db.saveSettings(settings);
+    applyProgramWeekToActiveSession();
+    showToast(`שבוע תוכנית עודכן ל-${settings.programWeek}`);
   });
   el('btnExportData').addEventListener('click', () => {
     const data = db.exportAll();
@@ -614,6 +743,7 @@ function wireSettings() {
 function renderSettingsTab() {
   el('settingRestSeconds').value = settings.restSeconds;
   el('settingWeeklyGoal').value = settings.weeklyGoal;
+  el('settingProgramWeek').value = settings.programWeek || 1;
 }
 
 /* ================= UTIL ================= */
