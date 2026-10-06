@@ -1,0 +1,17 @@
+{
+  "name": "מעקב כושר - אימוני כוח",
+  "short_name": "מעקב כושר",
+  "description": "אפליקציית מעקב אימוני כוח עם טיימרים, היסטוריה ודשבורד",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0d12",
+  "theme_color": "#101217",
+  "dir": "rtl",
+  "lang": "he",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
