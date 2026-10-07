@@ -254,8 +254,8 @@ function buildDraftSession() {
 
 function makeCardioEntry(kind) {
   return kind === 'warmup'
-    ? { exerciseId: 'warmup', exerciseName: 'חימום — הליכה', type: 'cardio', durationSec: 300, startedAt: null, completed: false }
-    : { exerciseId: 'cooldown', exerciseName: 'שחרור — הליכה', type: 'cardio', durationSec: 300, startedAt: null, completed: false };
+    ? { exerciseId: 'warmup', exerciseName: settings.warmupName, type: 'cardio', durationSec: settings.warmupMinutes * 60, startedAt: null, completed: false, location: '', pace: '' }
+    : { exerciseId: 'cooldown', exerciseName: settings.cooldownName, type: 'cardio', durationSec: settings.cooldownMinutes * 60, startedAt: null, completed: false, location: '', pace: '' };
 }
 
 function setsForWeek(ex) {
@@ -288,6 +288,7 @@ function getLastCompletedValuesByExercise() {
   for (let i = workouts.length - 1; i >= 0; i--) {
     const w = workouts[i];
     for (const entry of w.entries) {
+      if (entry.type === 'cardio' || !entry.sets) continue;
       if (map[entry.exerciseId]) continue;
       const lastSet = [...entry.sets].reverse().find((s) => s.completed);
       if (lastSet) map[entry.exerciseId] = { weightKg: lastSet.weightKg, reps: lastSet.reps };
@@ -379,7 +380,7 @@ function finishWorkout() {
         .map((e) => {
           if (e.type === 'cardio') {
             return e.completed
-              ? { exerciseId: e.exerciseId, exerciseName: e.exerciseName, type: 'cardio', durationSec: e.durationSec, completed: true }
+              ? { exerciseId: e.exerciseId, exerciseName: e.exerciseName, type: 'cardio', durationSec: e.durationSec, completed: true, location: e.location || '', pace: e.pace || '' }
               : null;
           }
           return {
@@ -441,11 +442,11 @@ function renderWorkoutTab() {
         <span class="exercise-num">${exerciseNumber}</span>
         <div>
           <div class="exercise-name">${escapeHtml(ex.name)}</div>
-          <div class="exercise-meta">${ex.inputType === 'hold' ? `החזקה: ${ex.holdSeconds || 15} שניות` : `${escapeHtml(ex.defaultReps)} חזרות`} &middot; ${escapeHtml(ex.notes || '')}</div>
+          <div class="exercise-muscle-line">${escapeHtml(ex.category)}</div>
+          <div class="exercise-meta">${ex.inputType === 'hold' ? `החזקה: ${ex.holdSeconds || 15} שניות` : `${escapeHtml(ex.defaultReps)} חזרות`}${ex.notes ? ' &middot; ' + escapeHtml(ex.notes) : ''}</div>
         </div>
       </div>
       <div class="exercise-head-right">
-        <span class="exercise-category-tag">${escapeHtml(ex.category)}</span>
         ${ex.images && ex.images.length ? '<button class="btn-photo btnShowPhoto">📷 תמונה</button>' : ''}
       </div>
     `;
@@ -583,6 +584,7 @@ function renderCardioCard(entry) {
   card.className = 'exercise-card cardio-card' + (entry.completed ? ' done' : '');
   const icon = isWarmup ? '🔥' : '🧘';
   const minutes = Math.round(entry.durationSec / 60);
+  const fullDurationSec = (isWarmup ? settings.warmupMinutes : settings.cooldownMinutes) * 60;
   card.innerHTML = `
     <div class="exercise-card-head">
       <div style="display:flex;gap:8px;align-items:flex-start;">
@@ -595,6 +597,14 @@ function renderCardioCard(entry) {
     </div>
     <div class="cardio-body">
       <div class="cardio-timer-display" id="cardio-remaining-${entry.exerciseId}">${formatHMS(entry.startedAt ? Math.max(0, entry.durationSec - (Date.now() - entry.startedAt) / 1000) : entry.durationSec)}</div>
+      <div class="cardio-pace-row">
+        <select class="select cardioLocation">
+          <option value="" ${!entry.location ? 'selected' : ''}>מיקום (לא צויין)</option>
+          <option value="treadmill" ${entry.location === 'treadmill' ? 'selected' : ''}>🏃 הליכון</option>
+          <option value="outside" ${entry.location === 'outside' ? 'selected' : ''}>🌳 בחוץ</option>
+        </select>
+        <input class="input cardioPace" type="text" placeholder='קצב/מהירות (לדוגמה: מהירות 6 ~10 קמ"ש)' value="${escapeHtml(entry.pace || '')}">
+      </div>
       <div class="settings-actions">
         <button class="btn btn-secondary btn-small btnCardioStart">${entry.startedAt && !entry.completed ? '⏸ עצור' : '▶ התחל'}</button>
         <button class="btn btn-secondary btn-small btnCardioReset">↺ איפוס</button>
@@ -602,6 +612,14 @@ function renderCardioCard(entry) {
       </div>
     </div>
   `;
+  qs('.cardioLocation', card).addEventListener('change', (e) => {
+    entry.location = e.target.value;
+    persistActiveSession();
+  });
+  qs('.cardioPace', card).addEventListener('input', (e) => {
+    entry.pace = e.target.value;
+    persistActiveSession();
+  });
   qs('.btnCardioStart', card).addEventListener('click', () => {
     if (entry.startedAt && !entry.completed) {
       // pause: bank the elapsed time by shrinking the remaining duration
@@ -617,7 +635,7 @@ function renderCardioCard(entry) {
     renderWorkoutTab();
   });
   qs('.btnCardioReset', card).addEventListener('click', () => {
-    entry.durationSec = 300;
+    entry.durationSec = fullDurationSec;
     entry.startedAt = null;
     entry.completed = false;
     persistActiveSession();
@@ -767,7 +785,7 @@ function renderHistoryTab() {
         ${w.entries.map((e) => e.type === 'cardio' ? `
           <div class="history-exercise-line">
             <b>${e.exerciseId === 'warmup' ? '🔥' : '🧘'} ${escapeHtml(e.exerciseName)}</b>
-            <div class="history-sets-line"><div>✅ בוצע (${Math.round(e.durationSec / 60)} דקות)</div></div>
+            <div class="history-sets-line"><div>✅ בוצע (${Math.round(e.durationSec / 60)} דקות)${formatCardioExtra(e)}</div></div>
           </div>
         ` : `
           <div class="history-exercise-line">
@@ -866,6 +884,14 @@ function openEditWorkoutModal(workout) {
 }
 
 /* ---------------- share workout(s) (email / WhatsApp / PDF / image) ---------------- */
+function formatCardioExtra(entry) {
+  const parts = [];
+  if (entry.location === 'treadmill') parts.push('🏃 הליכון');
+  else if (entry.location === 'outside') parts.push('🌳 בחוץ');
+  if (entry.pace) parts.push(entry.pace);
+  return parts.length ? ` — ${parts.join(' · ')}` : '';
+}
+
 function buildWorkoutShareLines(workoutsArr) {
   const who = profile && profile.name ? ` — ${profile.name}` : '';
   const lines = [];
@@ -884,7 +910,7 @@ function buildWorkoutShareLines(workoutsArr) {
     lines.push('');
     w.entries.forEach((e) => {
       if (e.type === 'cardio') {
-        if (e.completed) lines.push(`${e.exerciseId === 'warmup' ? '🔥 חימום' : '🧘 שחרור'}: ${Math.round(e.durationSec / 60)} דקות`);
+        if (e.completed) lines.push(`${e.exerciseId === 'warmup' ? '🔥 חימום' : '🧘 שחרור'}: ${Math.round(e.durationSec / 60)} דקות${formatCardioExtra(e)}`);
         return;
       }
       if (!e.sets.length) return;
@@ -897,92 +923,82 @@ function buildWorkoutShareLines(workoutsArr) {
   return lines;
 }
 
-function buildWorkoutShareText(workoutsArr) {
-  return buildWorkoutShareLines(workoutsArr).join('\n');
-}
-
-// Renders the same summary onto a canvas and returns a PNG Blob. Sharing an image
-// is far more reliable for WhatsApp (and most share targets) than a generated PDF,
-// and fully supports Hebrew/RTL since the canvas handles text shaping natively.
-function buildWorkoutShareImage(workoutsArr) {
-  return new Promise((resolve) => {
-    const lines = buildWorkoutShareLines(workoutsArr);
-    const width = 720;
-    const lineHeight = 30;
-    const topPadding = 90;
-    const height = topPadding + lines.length * lineHeight + 30;
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#0b0d12';
-    ctx.fillRect(0, 0, width, height);
-    ctx.direction = 'rtl';
-    ctx.textAlign = 'right';
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 28px Arial';
-    ctx.fillText('💪 AutoFit', width - 24, 48);
-    ctx.font = '16px Arial';
-    ctx.fillStyle = '#cbd5e1';
-    let y = topPadding;
-    lines.forEach((line) => {
-      ctx.fillText(line, width - 24, y);
-      y += lineHeight;
-    });
-    canvas.toBlob((blob) => resolve(blob), 'image/png');
+// Renders the summary onto a canvas (shared by both the image-share and PDF-share
+// paths). Canvas handles Hebrew/RTL text shaping natively, so this also sidesteps
+// the lack of Hebrew glyphs in PDF-library default fonts.
+function buildWorkoutShareCanvas(workoutsArr) {
+  const lines = buildWorkoutShareLines(workoutsArr);
+  const width = 720;
+  const lineHeight = 30;
+  const topPadding = 90;
+  const height = topPadding + lines.length * lineHeight + 30;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#0b0d12';
+  ctx.fillRect(0, 0, width, height);
+  ctx.direction = 'rtl';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 28px Arial';
+  ctx.fillText('💪 AutoFit', width - 24, 48);
+  ctx.font = '16px Arial';
+  ctx.fillStyle = '#cbd5e1';
+  let y = topPadding;
+  lines.forEach((line) => {
+    ctx.fillText(line, width - 24, y);
+    y += lineHeight;
   });
+  return canvas;
 }
 
-function openWorkoutPrintView(workoutsArr) {
-  const who = profile && profile.name ? escapeHtml(profile.name) : '';
-  const win = window.open('', '_blank');
-  if (!win) { showToast('הדפדפן חסם פתיחת חלון — אפשר לנסות שוב'); return; }
-  const sections = workoutsArr.map((w) => {
-    const rows = w.entries.map((e) => {
-      if (e.type === 'cardio') {
-        return e.completed
-          ? `<div class="pw-ex"><b>${e.exerciseId === 'warmup' ? '🔥 חימום' : '🧘 שחרור'}</b> — ${Math.round(e.durationSec / 60)} דקות</div>`
-          : '';
-      }
-      if (!e.sets.length) return '';
-      return `<div class="pw-ex"><b>${escapeHtml(e.exerciseName)}</b>
-        <table><thead><tr><th>סט</th><th>ק"ג</th><th>חזרות</th></tr></thead>
-        <tbody>${e.sets.map((s, i) => `<tr><td>${i + 1}</td><td>${s.weightKg}</td><td>${s.reps}</td></tr>`).join('')}</tbody>
-        </table></div>`;
-    }).join('');
-    return `<section class="pw-section">
-      <div class="pw-sub">${formatDate(w.dateISO)} &middot; משך: ${formatHMS(w.durationSec)}</div>
-      <div class="pw-stats"><span>📦 נפח: ${Math.round(computeVolume(w)).toLocaleString()} ק"ג</span></div>
-      ${rows}
-    </section>`;
-  }).join('<div class="pw-divider"></div>');
-  const title = workoutsArr.length > 1 ? `${workoutsArr.length} אימוני AutoFit` : `אימון AutoFit — ${formatDate(workoutsArr[0].dateISO)}`;
-  win.document.write(`<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">
-    <title>${title}</title>
-    <style>
-      body{font-family:Arial, Helvetica, sans-serif; padding:24px; color:#111;}
-      h1{text-align:center; margin-bottom:4px;}
-      .pw-sub{text-align:center; color:#555; margin-bottom:20px;}
-      .pw-stats{display:flex; justify-content:center; gap:18px; margin-bottom:24px; flex-wrap:wrap;}
-      .pw-stats span{background:#f1f1f1; padding:6px 12px; border-radius:8px;}
-      .pw-ex{margin-bottom:14px; page-break-inside:avoid;}
-      .pw-section{margin-bottom:10px;}
-      .pw-divider{border-top:2px dashed #ccc; margin:24px 0; page-break-after:always;}
-      table{width:100%; border-collapse:collapse; margin-top:4px;}
-      th,td{border:1px solid #ccc; padding:4px 8px; text-align:center;}
-      .pw-footer{text-align:center; margin-top:30px; color:#888; font-size:12px;}
-    </style></head><body>
-    <h1>💪 AutoFit${who ? ' — ' + who : ''}</h1>
-    ${sections}
-    <div class="pw-footer">נוצר באפליקציית AutoFit</div>
-    <script>window.onload = () => setTimeout(() => window.print(), 300);</script>
-    </body></html>`);
-  win.document.close();
+// Sharing an image is far more reliable for WhatsApp (and most share targets)
+// than a generated PDF, and fully supports Hebrew/RTL.
+function buildWorkoutShareImage(workoutsArr) {
+  const canvas = buildWorkoutShareCanvas(workoutsArr);
+  return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), 'image/png'));
+}
+
+// Builds a real PDF file (not just a print dialog) by embedding the rendered
+// canvas as an image inside a jsPDF document, so it can be shared as an actual
+// attachable file via the native share sheet (unlike window.print(), which only
+// opens the browser print UI and cannot be "sent" directly to an app).
+function buildWorkoutSharePdf(workoutsArr) {
+  const canvas = buildWorkoutShareCanvas(workoutsArr);
+  const { jsPDF } = window.jspdf || {};
+  if (!jsPDF) return null;
+  const pxToMm = 0.264583;
+  const wMm = canvas.width * pxToMm;
+  const hMm = canvas.height * pxToMm;
+  const doc = new jsPDF({ orientation: hMm > wMm ? 'p' : 'l', unit: 'mm', format: [wMm, hMm] });
+  doc.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, wMm, hMm);
+  return doc.output('blob');
+}
+
+// Shares a file (image/PNG or application/pdf) through the native OS share sheet
+// when supported (this is what makes "send to WhatsApp/Mail" actually work,
+// since neither wa.me nor mailto: support file attachments). Falls back to a
+// plain download so the user can still attach it manually.
+async function shareFile(blob, filename, mime) {
+  if (!blob) { showToast('היצירה נכשלה, נסה שוב'); return; }
+  const file = new File([blob], filename, { type: mime });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'אימון AutoFit' }); return; } catch (e) { return; }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+  showToast('הקובץ הורד — אפשר לצרף ולשלוח אותו ידנית במייל/וואטסאפ');
 }
 
 function openShareModal(workoutsArr) {
   const list = Array.isArray(workoutsArr) ? workoutsArr : [workoutsArr];
-  const text = buildWorkoutShareText(list);
   const title = list.length > 1 ? `שיתוף ${list.length} אימונים` : `שיתוף אימון — ${formatDate(list[0].dateISO)}`;
   const overlay = document.createElement('div');
   overlay.className = 'photo-overlay';
@@ -990,11 +1006,8 @@ function openShareModal(workoutsArr) {
     <div class="photo-modal">
       <div class="photo-modal-head"><b>${title}</b><button class="btn-icon btnCloseShare">✕</button></div>
       <div class="settings-actions" style="flex-direction:column;">
-        ${navigator.share ? '<button class="btn btn-primary" id="shareNative">📲 שתף (מייל / וואטסאפ / ועוד)</button>' : ''}
-        <button class="btn btn-secondary" id="shareImage">🖼️ שתף כתמונה (מומלץ לוואטסאפ)</button>
-        <button class="btn btn-secondary" id="shareMail">📧 שליחה במייל</button>
-        <button class="btn btn-secondary" id="shareWhatsapp">💬 שליחה בוואטסאפ (טקסט)</button>
-        <button class="btn btn-secondary" id="sharePdf">🖨️ ייצוא כ-PDF (הדפסה/שמירה)</button>
+        <button class="btn btn-primary" id="sharePdf">📄 שתף כ-PDF (למייל/וואטסאפ)</button>
+        <button class="btn btn-secondary" id="shareImage">🖼️ שתף כתמונה (למייל/וואטסאפ)</button>
       </div>
     </div>
   `;
@@ -1002,40 +1015,14 @@ function openShareModal(workoutsArr) {
   const close = () => overlay.remove();
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   qs('.btnCloseShare', overlay).addEventListener('click', close);
-  if (navigator.share) {
-    qs('#shareNative', overlay).addEventListener('click', async () => {
-      try { await navigator.share({ title: 'אימון AutoFit', text }); close(); } catch (e) { /* user cancelled */ }
-    });
-  }
+  qs('#sharePdf', overlay).addEventListener('click', async () => {
+    const blob = buildWorkoutSharePdf(list);
+    await shareFile(blob, `autofit-${Date.now()}.pdf`, 'application/pdf');
+    close();
+  });
   qs('#shareImage', overlay).addEventListener('click', async () => {
     const blob = await buildWorkoutShareImage(list);
-    if (!blob) { showToast('יצירת התמונה נכשלה, נסה שוב'); return; }
-    const file = new File([blob], `autofit-${Date.now()}.png`, { type: 'image/png' });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: 'אימון AutoFit' }); close(); return; } catch (e) { /* user cancelled */ return; }
-    }
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = file.name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 3000);
-    showToast('התמונה הורדה — אפשר לשתף אותה מהגלריה/קבצים בוואטסאפ');
-    close();
-  });
-  qs('#shareMail', overlay).addEventListener('click', () => {
-    const subject = encodeURIComponent(title);
-    window.location.href = `mailto:?subject=${subject}&body=${encodeURIComponent(text)}`;
-    close();
-  });
-  qs('#shareWhatsapp', overlay).addEventListener('click', () => {
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-    close();
-  });
-  qs('#sharePdf', overlay).addEventListener('click', () => {
-    openWorkoutPrintView(list);
+    await shareFile(blob, `autofit-${Date.now()}.png`, 'image/png');
     close();
   });
 }
@@ -1222,6 +1209,30 @@ function wireExercisesTab() {
     const draft = { id: db.uid(), name: '', category: 'כללי', defaultSets: 3, defaultReps: '12-15', restSeconds: 120, notes: '', images: [], active: true };
     openExerciseEditModal(draft, { isNew: true });
   });
+  loadWarmupCooldownFields();
+  el('btnSaveWarmupCooldown').addEventListener('click', () => {
+    const warmupName = el('warmupNameInput').value.trim() || DEFAULT_WARMUP_NAME;
+    const cooldownName = el('cooldownNameInput').value.trim() || DEFAULT_COOLDOWN_NAME;
+    const warmupMinutes = Math.max(1, parseInt(el('warmupMinutesInput').value, 10) || 5);
+    const cooldownMinutes = Math.max(1, parseInt(el('cooldownMinutesInput').value, 10) || 5);
+    settings.warmupName = warmupName;
+    settings.cooldownName = cooldownName;
+    settings.warmupMinutes = warmupMinutes;
+    settings.cooldownMinutes = cooldownMinutes;
+    db.saveSettings(settings);
+    loadWarmupCooldownFields();
+    showToast('החימום והשחרור עודכנו ✅');
+  });
+}
+
+const DEFAULT_WARMUP_NAME = 'חימום — הליכה';
+const DEFAULT_COOLDOWN_NAME = 'שחרור — הליכה';
+
+function loadWarmupCooldownFields() {
+  el('warmupNameInput').value = settings.warmupName;
+  el('warmupMinutesInput').value = settings.warmupMinutes;
+  el('cooldownNameInput').value = settings.cooldownName;
+  el('cooldownMinutesInput').value = settings.cooldownMinutes;
 }
 
 function renderExercisesTab() {
