@@ -33,6 +33,7 @@ async function requestWakeLock() {
   try {
     if ('wakeLock' in navigator) {
       wakeLockRef = await navigator.wakeLock.request('screen');
+      wakeLockRef.addEventListener('release', () => { wakeLockRef = null; });
     }
   } catch (e) { /* wake lock not available / denied — timer still stays accurate */ }
 }
@@ -46,11 +47,13 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
     if (activeSession && activeSession.running) {
       stopwatch.forceTick();
-      requestWakeLock();
     }
     if (restTimer.isRunning()) restTimer.forceTick();
+    requestWakeLock();
   }
 });
+// Some browsers only grant the wake lock from within a user gesture — retry on first tap.
+document.addEventListener('click', () => { if (!wakeLockRef) requestWakeLock(); }, { once: false });
 
 function el(id) { return document.getElementById(id); }
 function qs(sel, parent = document) { return parent.querySelector(sel); }
@@ -97,9 +100,11 @@ function init() {
   renderExercisesTab();
   renderSettingsTab();
 
+  // keep the phone screen on the whole time the site is open, not just during a workout
+  requestWakeLock();
+
   if (activeSession.running) {
     stopwatch.start(new Date(activeSession.startedAt).getTime());
-    requestWakeLock();
     el('btnStartWorkout').classList.add('hidden');
     el('btnFinishWorkout').classList.remove('hidden');
   }
@@ -231,7 +236,6 @@ function wireWorkoutControls() {
 
 function finishWorkout() {
   const durationSec = stopwatch.stop();
-  releaseWakeLock();
   activeSession.running = false;
   activeSession.accumulatedSec = durationSec;
 
