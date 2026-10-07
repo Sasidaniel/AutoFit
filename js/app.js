@@ -40,10 +40,16 @@ const restTimer = new RestTimer({
    a timer completes (shows even if the user briefly switched apps/tabs), and
    force every timer to re-check itself the instant the page becomes visible again. */
 function requestNotificationPermission() {
-  if (!('Notification' in window)) { showToast('התראות מערכת לא נתמכות בדפדפן הזה'); return; }
-  if (Notification.permission === 'granted') { showToast('התראות כבר מאושרות ✅'); return; }
+  // This also acts as the one required user-gesture to unlock sound/speech on iOS Safari.
+  primeSpeech();
+  playBeep();
+  if (!('Notification' in window)) {
+    showToast('באייפון/ספארי אין תמיכה בהתראות מערכת לאתר כזה ללא שרת Push ייעודי — אבל צליל + הכרזה קולית הופעלו עכשיו ויישמעו אוטומטית כל עוד האתר פתוח 🔊');
+    return;
+  }
+  if (Notification.permission === 'granted') { showToast('התראות כבר מאושרות, וגם צליל/קול הופעלו ✅'); return; }
   Notification.requestPermission().then((perm) => {
-    showToast(perm === 'granted' ? 'התראות אושרו ✅' : 'התראות נחסמו — אפשר לשנות בהגדרות הדפדפן');
+    showToast(perm === 'granted' ? 'התראות אושרו ✅ (וגם צליל/קול הופעלו)' : 'התראות נחסמו, אך צליל/קול יעבדו כל עוד האתר פתוח');
   }).catch(() => {});
 }
 function notify(title, body) {
@@ -176,6 +182,7 @@ function init() {
     stopwatch.start(new Date(activeSession.startedAt).getTime());
     el('btnStartWorkout').classList.add('hidden');
     el('btnFinishWorkout').classList.remove('hidden');
+    el('btnCancelWorkout').classList.remove('hidden');
   }
 
   renderDashboard(); // initial; chart lib loaded via defer, retry if not ready
@@ -300,6 +307,8 @@ function wireWorkoutControls() {
     finishWorkout();
   });
 
+  el('btnCancelWorkout').addEventListener('click', cancelWorkout);
+
   el('btnSkipRest').addEventListener('click', () => {
     restTimer.stop();
     el('restOverlay').classList.add('hidden');
@@ -318,6 +327,23 @@ function ensureWorkoutStarted() {
   requestWakeLock();
   el('btnStartWorkout').classList.add('hidden');
   el('btnFinishWorkout').classList.remove('hidden');
+  el('btnCancelWorkout').classList.remove('hidden');
+}
+
+// Cancels the current workout without saving anything to history, resetting
+// the draft back to a blank session (the opposite of finishWorkout's save path).
+function cancelWorkout() {
+  if (!confirm('לבטל את האימון הנוכחי ולאפס את כל הנתונים שמולאו? פעולה זו לא ניתנת לביטול.')) return;
+  stopwatch.stop();
+  activeSession.running = false;
+  db.clearActiveSession();
+  activeSession = buildDraftSession();
+  el('workoutTimerDisplay').textContent = '00:00';
+  el('btnStartWorkout').classList.remove('hidden');
+  el('btnFinishWorkout').classList.add('hidden');
+  el('btnCancelWorkout').classList.add('hidden');
+  renderWorkoutTab();
+  showToast('האימון בוטל ואופס 🔄');
 }
 
 const CELEBRATION_MESSAGES = [
@@ -381,6 +407,7 @@ function finishWorkout() {
   el('workoutTimerDisplay').textContent = '00:00';
   el('btnStartWorkout').classList.remove('hidden');
   el('btnFinishWorkout').classList.add('hidden');
+  el('btnCancelWorkout').classList.add('hidden');
   renderWorkoutTab();
   renderHistoryTab();
 }
@@ -687,6 +714,8 @@ function startRestTimer(ex, exerciseDone) {
   el('restExerciseName').textContent = ex.name;
   el('restOverlay').classList.remove('hidden');
   restDoneMessage = exerciseDone ? 'אפשר להמשיך לתרגיל הבא' : 'אפשר להמשיך לסט הבא';
+  playBeep();
+  if (settings.voiceAnnouncements) speak(exerciseDone ? `${ex.name} הושלם, זמן מנוחה` : 'סט הושלם, זמן מנוחה');
   restTimer.start(seconds);
 }
 
@@ -718,6 +747,7 @@ function renderHistoryTab() {
           </div>
         </div>
         <div style="display:flex;gap:2px;">
+          <button class="btn-icon btnShareWorkout">📤</button>
           <button class="btn-icon btnEditWorkout">✏️</button>
           <button class="btn-icon btnDeleteWorkout">🗑️</button>
         </div>
@@ -745,6 +775,10 @@ function renderHistoryTab() {
     qs('.btnEditWorkout', item).addEventListener('click', (ev) => {
       ev.stopPropagation();
       openEditWorkoutModal(w);
+    });
+    qs('.btnShareWorkout', item).addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      openShareModal(w);
     });
     qs('.btnDeleteWorkout', item).addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -815,6 +849,109 @@ function openEditWorkoutModal(workout) {
     renderHistoryTab();
     renderDashboard();
     showToast('האימון עודכן ✅');
+  });
+}
+
+/* ---------------- share workout (email / WhatsApp / PDF) ---------------- */
+function buildWorkoutShareText(w) {
+  const lines = [];
+  const who = profile && profile.name ? ` — ${profile.name}` : '';
+  lines.push(`💪 אימון AutoFit${who}`);
+  lines.push(`📅 ${formatDate(w.dateISO)}`);
+  lines.push(`⏱ משך האימון: ${formatHMS(w.durationSec)}`);
+  lines.push(`📦 נפח כולל: ${Math.round(computeVolume(w)).toLocaleString()} ק"ג`);
+  lines.push('');
+  w.entries.forEach((e) => {
+    if (e.type === 'cardio') {
+      if (e.completed) lines.push(`${e.exerciseId === 'warmup' ? '🔥 חימום' : '🧘 שחרור'}: ${Math.round(e.durationSec / 60)} דקות`);
+      return;
+    }
+    if (!e.sets.length) return;
+    lines.push(`🏋️ ${e.exerciseName}`);
+    e.sets.forEach((s, i) => lines.push(`   סט ${i + 1}: ${s.weightKg} ק"ג × ${s.reps}`));
+  });
+  lines.push('');
+  lines.push('נשלח מתוך AutoFit 🚀');
+  return lines.join('\n');
+}
+
+function openWorkoutPrintView(w) {
+  const who = profile && profile.name ? escapeHtml(profile.name) : '';
+  const win = window.open('', '_blank');
+  if (!win) { showToast('הדפדפן חסם פתיחת חלון — אפשר לנסות שוב'); return; }
+  const rows = w.entries.map((e) => {
+    if (e.type === 'cardio') {
+      return e.completed
+        ? `<div class="pw-ex"><b>${e.exerciseId === 'warmup' ? '🔥 חימום' : '🧘 שחרור'}</b> — ${Math.round(e.durationSec / 60)} דקות</div>`
+        : '';
+    }
+    if (!e.sets.length) return '';
+    return `<div class="pw-ex"><b>${escapeHtml(e.exerciseName)}</b>
+      <table><thead><tr><th>סט</th><th>ק"ג</th><th>חזרות</th></tr></thead>
+      <tbody>${e.sets.map((s, i) => `<tr><td>${i + 1}</td><td>${s.weightKg}</td><td>${s.reps}</td></tr>`).join('')}</tbody>
+      </table></div>`;
+  }).join('');
+  win.document.write(`<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">
+    <title>אימון AutoFit — ${formatDate(w.dateISO)}</title>
+    <style>
+      body{font-family:Arial, Helvetica, sans-serif; padding:24px; color:#111;}
+      h1{text-align:center; margin-bottom:4px;}
+      .pw-sub{text-align:center; color:#555; margin-bottom:20px;}
+      .pw-stats{display:flex; justify-content:center; gap:18px; margin-bottom:24px; flex-wrap:wrap;}
+      .pw-stats span{background:#f1f1f1; padding:6px 12px; border-radius:8px;}
+      .pw-ex{margin-bottom:14px; page-break-inside:avoid;}
+      table{width:100%; border-collapse:collapse; margin-top:4px;}
+      th,td{border:1px solid #ccc; padding:4px 8px; text-align:center;}
+      .pw-footer{text-align:center; margin-top:30px; color:#888; font-size:12px;}
+    </style></head><body>
+    <h1>💪 AutoFit${who ? ' — ' + who : ''}</h1>
+    <div class="pw-sub">${formatDate(w.dateISO)} &middot; משך: ${formatHMS(w.durationSec)}</div>
+    <div class="pw-stats">
+      <span>📦 נפח: ${Math.round(computeVolume(w)).toLocaleString()} ק"ג</span>
+    </div>
+    ${rows}
+    <div class="pw-footer">נוצר באפליקציית AutoFit</div>
+    <script>window.onload = () => setTimeout(() => window.print(), 300);</script>
+    </body></html>`);
+  win.document.close();
+}
+
+function openShareModal(w) {
+  const text = buildWorkoutShareText(w);
+  const overlay = document.createElement('div');
+  overlay.className = 'photo-overlay';
+  overlay.innerHTML = `
+    <div class="photo-modal">
+      <div class="photo-modal-head"><b>שיתוף אימון — ${formatDate(w.dateISO)}</b><button class="btn-icon btnCloseShare">✕</button></div>
+      <div class="settings-actions" style="flex-direction:column;">
+        ${navigator.share ? '<button class="btn btn-primary" id="shareNative">📲 שתף (מייל / וואטסאפ / ועוד)</button>' : ''}
+        <button class="btn btn-secondary" id="shareMail">📧 שליחה במייל</button>
+        <button class="btn btn-secondary" id="shareWhatsapp">💬 שליחה בוואטסאפ</button>
+        <button class="btn btn-secondary" id="sharePdf">🖨️ ייצוא כ-PDF (הדפסה/שמירה)</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  qs('.btnCloseShare', overlay).addEventListener('click', close);
+  if (navigator.share) {
+    qs('#shareNative', overlay).addEventListener('click', async () => {
+      try { await navigator.share({ title: 'אימון AutoFit', text }); close(); } catch (e) { /* user cancelled */ }
+    });
+  }
+  qs('#shareMail', overlay).addEventListener('click', () => {
+    const subject = encodeURIComponent(`אימון AutoFit — ${formatDate(w.dateISO)}`);
+    window.location.href = `mailto:?subject=${subject}&body=${encodeURIComponent(text)}`;
+    close();
+  });
+  qs('#shareWhatsapp', overlay).addEventListener('click', () => {
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+    close();
+  });
+  qs('#sharePdf', overlay).addEventListener('click', () => {
+    openWorkoutPrintView(w);
+    close();
   });
 }
 

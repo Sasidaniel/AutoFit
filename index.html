@@ -34,6 +34,7 @@
         <div class="workout-controls">
           <button id="btnStartWorkout" class="btn btn-primary">התחל אימון</button>
           <button id="btnFinishWorkout" class="btn btn-danger hidden">סיים אימון</button>
+          <button id="btnCancelWorkout" class="btn btn-secondary hidden">בטל אימון</button>
         </div>
       </div>
       <div class="progress-summary">
@@ -122,9 +123,9 @@
       <div class="field-hint">💡 המסך אמור להישאר דלוק אוטומטית כל עוד האתר פתוח (דורש iOS 16.4+ / דפדפן תומך). אם המסך עדיין נכבה, גע במסך פעם אחת כדי להפעיל זאת.</div>
 
       <div class="settings-actions">
-        <button id="btnEnableNotifications" class="btn btn-secondary">🔔 אפשר התראות</button>
+        <button id="btnEnableNotifications" class="btn btn-secondary">🔊 בדוק צליל והכרזה קולית</button>
       </div>
-      <div class="field-hint">מאפשר התראת מערכת (גם אם יצאת מהאפליקציה לרגע) בסיום מנוחה/חימום/שחרור. דורש אישור חד-פעמי, ועדיין תלוי במגבלות iOS כשהמסך נעול לגמרי לאורך זמן.</div>
+      <div class="field-hint">באייפון/ספארי אין תמיכה בהתראות מערכת כשהמסך נעול או שיצאת לגמרי מהאפליקציה (זו מגבלת אפל וללא שרת Push ייעודי אי אפשר לעקוף אותה). מה שכן עובד: צליל + הכרזה קולית ישמיעו אוטומטית בסיום מנוחה/חימום/החזקה כל עוד האתר פתוח — גם אם עברת רגע לאפליקציה אחרת. לחץ כאן כדי לוודא שהצליל מופעל במכשיר שלך.</div>
 
       <div class="settings-actions">
         <button id="btnExportData" class="btn btn-secondary">ייצוא גיבוי (JSON)</button>
