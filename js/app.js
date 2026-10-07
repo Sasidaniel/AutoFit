@@ -183,7 +183,6 @@ function init() {
     stopwatch.start(new Date(activeSession.startedAt).getTime());
     el('btnStartWorkout').classList.add('hidden');
     el('btnFinishWorkout').classList.remove('hidden');
-    el('btnCancelWorkout').classList.remove('hidden');
   }
 
   renderDashboard(); // initial; chart lib loaded via defer, retry if not ready
@@ -328,7 +327,6 @@ function ensureWorkoutStarted() {
   requestWakeLock();
   el('btnStartWorkout').classList.add('hidden');
   el('btnFinishWorkout').classList.remove('hidden');
-  el('btnCancelWorkout').classList.remove('hidden');
 }
 
 // Cancels the current workout without saving anything to history, resetting
@@ -342,7 +340,6 @@ function cancelWorkout() {
   el('workoutTimerDisplay').textContent = '00:00';
   el('btnStartWorkout').classList.remove('hidden');
   el('btnFinishWorkout').classList.add('hidden');
-  el('btnCancelWorkout').classList.add('hidden');
   renderWorkoutTab();
   showToast('האימון בוטל ואופס 🔄');
 }
@@ -408,7 +405,6 @@ function finishWorkout() {
   el('workoutTimerDisplay').textContent = '00:00';
   el('btnStartWorkout').classList.remove('hidden');
   el('btnFinishWorkout').classList.add('hidden');
-  el('btnCancelWorkout').classList.add('hidden');
   renderWorkoutTab();
   renderHistoryTab();
 }
@@ -763,7 +759,6 @@ function renderHistoryTab() {
           </div>
         </div>
         <div style="display:flex;gap:2px;">
-          <button class="btn-icon btnShareWorkout">📤</button>
           <button class="btn-icon btnEditWorkout">✏️</button>
           <button class="btn-icon btnDeleteWorkout">🗑️</button>
         </div>
@@ -785,7 +780,7 @@ function renderHistoryTab() {
       </div>
     `;
     item.addEventListener('click', (ev) => {
-      if (ev.target.closest('.btnDeleteWorkout') || ev.target.closest('.btnEditWorkout') || ev.target.closest('.btnShareWorkout') || ev.target.closest('.history-select-check')) return;
+      if (ev.target.closest('.btnDeleteWorkout') || ev.target.closest('.btnEditWorkout') || ev.target.closest('.history-select-check')) return;
       item.classList.toggle('open');
     });
     qs('.history-select-check', item).addEventListener('change', (ev) => {
@@ -797,10 +792,6 @@ function renderHistoryTab() {
     qs('.btnEditWorkout', item).addEventListener('click', (ev) => {
       ev.stopPropagation();
       openEditWorkoutModal(w);
-    });
-    qs('.btnShareWorkout', item).addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      openShareModal([w]);
     });
     qs('.btnDeleteWorkout', item).addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -874,8 +865,8 @@ function openEditWorkoutModal(workout) {
   });
 }
 
-/* ---------------- share workout(s) (email / WhatsApp / PDF) ---------------- */
-function buildWorkoutShareText(workoutsArr) {
+/* ---------------- share workout(s) (email / WhatsApp / PDF / image) ---------------- */
+function buildWorkoutShareLines(workoutsArr) {
   const who = profile && profile.name ? ` — ${profile.name}` : '';
   const lines = [];
   if (workoutsArr.length > 1) {
@@ -903,7 +894,43 @@ function buildWorkoutShareText(workoutsArr) {
     lines.push('');
   });
   lines.push('נשלח מתוך AutoFit 🚀');
-  return lines.join('\n');
+  return lines;
+}
+
+function buildWorkoutShareText(workoutsArr) {
+  return buildWorkoutShareLines(workoutsArr).join('\n');
+}
+
+// Renders the same summary onto a canvas and returns a PNG Blob. Sharing an image
+// is far more reliable for WhatsApp (and most share targets) than a generated PDF,
+// and fully supports Hebrew/RTL since the canvas handles text shaping natively.
+function buildWorkoutShareImage(workoutsArr) {
+  return new Promise((resolve) => {
+    const lines = buildWorkoutShareLines(workoutsArr);
+    const width = 720;
+    const lineHeight = 30;
+    const topPadding = 90;
+    const height = topPadding + lines.length * lineHeight + 30;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#0b0d12';
+    ctx.fillRect(0, 0, width, height);
+    ctx.direction = 'rtl';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 28px Arial';
+    ctx.fillText('💪 AutoFit', width - 24, 48);
+    ctx.font = '16px Arial';
+    ctx.fillStyle = '#cbd5e1';
+    let y = topPadding;
+    lines.forEach((line) => {
+      ctx.fillText(line, width - 24, y);
+      y += lineHeight;
+    });
+    canvas.toBlob((blob) => resolve(blob), 'image/png');
+  });
 }
 
 function openWorkoutPrintView(workoutsArr) {
@@ -964,8 +991,9 @@ function openShareModal(workoutsArr) {
       <div class="photo-modal-head"><b>${title}</b><button class="btn-icon btnCloseShare">✕</button></div>
       <div class="settings-actions" style="flex-direction:column;">
         ${navigator.share ? '<button class="btn btn-primary" id="shareNative">📲 שתף (מייל / וואטסאפ / ועוד)</button>' : ''}
+        <button class="btn btn-secondary" id="shareImage">🖼️ שתף כתמונה (מומלץ לוואטסאפ)</button>
         <button class="btn btn-secondary" id="shareMail">📧 שליחה במייל</button>
-        <button class="btn btn-secondary" id="shareWhatsapp">💬 שליחה בוואטסאפ</button>
+        <button class="btn btn-secondary" id="shareWhatsapp">💬 שליחה בוואטסאפ (טקסט)</button>
         <button class="btn btn-secondary" id="sharePdf">🖨️ ייצוא כ-PDF (הדפסה/שמירה)</button>
       </div>
     </div>
@@ -979,6 +1007,24 @@ function openShareModal(workoutsArr) {
       try { await navigator.share({ title: 'אימון AutoFit', text }); close(); } catch (e) { /* user cancelled */ }
     });
   }
+  qs('#shareImage', overlay).addEventListener('click', async () => {
+    const blob = await buildWorkoutShareImage(list);
+    if (!blob) { showToast('יצירת התמונה נכשלה, נסה שוב'); return; }
+    const file = new File([blob], `autofit-${Date.now()}.png`, { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'אימון AutoFit' }); close(); return; } catch (e) { /* user cancelled */ return; }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    showToast('התמונה הורדה — אפשר לשתף אותה מהגלריה/קבצים בוואטסאפ');
+    close();
+  });
   qs('#shareMail', overlay).addEventListener('click', () => {
     const subject = encodeURIComponent(title);
     window.location.href = `mailto:?subject=${subject}&body=${encodeURIComponent(text)}`;
@@ -995,9 +1041,7 @@ function openShareModal(workoutsArr) {
 }
 
 function updateHistorySelectBar() {
-  const bar = el('historySelectBar');
   const n = selectedWorkoutIds.size;
-  bar.classList.toggle('hidden', n === 0);
   el('historySelectCount').textContent = `${n} נבחרו`;
 }
 
@@ -1005,7 +1049,10 @@ function wireHistoryTab() {
   el('btnShareSelected').addEventListener('click', () => {
     const selected = workouts.filter((w) => selectedWorkoutIds.has(w.id))
       .sort((a, b) => new Date(a.dateISO) - new Date(b.dateISO));
-    if (!selected.length) return;
+    if (!selected.length) {
+      showToast('בחר לפחות אימון אחד מההיסטוריה כדי לשתף ✅');
+      return;
+    }
     openShareModal(selected);
   });
   el('btnClearSelection').addEventListener('click', () => {
