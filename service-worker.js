@@ -1,5 +1,5 @@
 ﻿// service-worker.js â€” app shell caching for offline + installability
-const CACHE_NAME = 'fitness-tracker-v14';
+const CACHE_NAME = 'fitness-tracker-v15';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -80,6 +80,7 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
 
 
 

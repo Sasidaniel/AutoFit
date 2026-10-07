@@ -923,33 +923,141 @@ function buildWorkoutShareLines(workoutsArr) {
   return lines;
 }
 
-// Renders the summary onto a canvas (shared by both the image-share and PDF-share
-// paths). Canvas handles Hebrew/RTL text shaping natively, so this also sidesteps
-// the lack of Hebrew glyphs in PDF-library default fonts.
+// Renders a styled, white-background, table-like summary onto a canvas (shared by
+// both the image-share and PDF-share paths). Canvas is used (rather than jsPDF's
+// native text API) because jsPDF's built-in fonts don't include Hebrew glyphs —
+// the canvas renders Hebrew natively via the OS font and we embed the result as
+// an image, giving us a clean printable look with a real white background.
 function buildWorkoutShareCanvas(workoutsArr) {
-  const lines = buildWorkoutShareLines(workoutsArr);
-  const width = 720;
-  const lineHeight = 30;
-  const topPadding = 90;
-  const height = topPadding + lines.length * lineHeight + 30;
+  const width = 760;
+  const margin = 28;
+  const innerWidth = width - margin * 2;
+  const COLORS = {
+    bg: '#ffffff', text: '#1f2430', muted: '#6b7280', border: '#e1e5f0',
+    primary: '#2563eb', primarySoft: '#eef2ff', rowAlt: '#f7f9fc', success: '#16a34a',
+  };
+  const who = profile && profile.name ? ` — ${profile.name}` : '';
+
+  // ---- Pass 1: build a flat list of draw "blocks" and measure total height ----
+  const blocks = [];
+  const add = (type, h, data) => blocks.push({ type, h, ...data });
+  add('title', 54, { text: `💪 AutoFit${who}` });
+  if (workoutsArr.length > 1) {
+    const totalVolume = workoutsArr.reduce((a, w) => a + computeVolume(w), 0);
+    add('stats', 46, { stats: [`${workoutsArr.length} אימונים`, `${Math.round(totalVolume).toLocaleString()} ק"ג נפח מצטבר`] });
+  }
+  workoutsArr.forEach((w, wi) => {
+    if (wi > 0) add('divider', 24, {});
+    if (workoutsArr.length > 1) add('section', 34, { text: `אימון ${wi + 1} — ${formatDate(w.dateISO)}` });
+    add('stats', 46, { stats: [formatDate(w.dateISO), `⏱ ${formatHMS(w.durationSec)}`, `📦 ${Math.round(computeVolume(w)).toLocaleString()} ק"ג`] });
+    w.entries.forEach((e) => {
+      if (e.type === 'cardio') {
+        if (!e.completed) return;
+        const icon = e.exerciseId === 'warmup' ? '🔥' : '🧘';
+        add('cardio', 40, { text: `${icon} ${e.exerciseName} — ${Math.round(e.durationSec / 60)} דקות${formatCardioExtra(e)}` });
+        return;
+      }
+      if (!e.sets.length) return;
+      add('exTitle', 36, { text: e.exerciseName });
+      add('tableHeader', 28, {});
+      e.sets.forEach((s, i) => add('tableRow', 26, { i, weightKg: s.weightKg, reps: s.reps }));
+      add('spacer', 8, {});
+    });
+  });
+  add('footer', 40, { text: 'נשלח מתוך AutoFit 🚀' });
+
+  const height = margin + blocks.reduce((a, b) => a + b.h, 0) + margin;
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#0b0d12';
+
+  // ---- Pass 2: draw ----
+  ctx.fillStyle = COLORS.bg;
   ctx.fillRect(0, 0, width, height);
   ctx.direction = 'rtl';
-  ctx.textAlign = 'right';
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 28px Arial';
-  ctx.fillText('💪 AutoFit', width - 24, 48);
-  ctx.font = '16px Arial';
-  ctx.fillStyle = '#cbd5e1';
-  let y = topPadding;
-  lines.forEach((line) => {
-    ctx.fillText(line, width - 24, y);
-    y += lineHeight;
+  const right = width - margin;
+  let y = margin;
+
+  blocks.forEach((b) => {
+    const cy = y + b.h / 2;
+    if (b.type === 'title') {
+      ctx.textAlign = 'right';
+      ctx.fillStyle = COLORS.primary;
+      ctx.font = 'bold 26px Arial';
+      ctx.fillText(b.text, right, y + 34);
+    } else if (b.type === 'section') {
+      ctx.textAlign = 'right';
+      ctx.fillStyle = COLORS.text;
+      ctx.font = 'bold 18px Arial';
+      ctx.fillText(b.text, right, y + 24);
+    } else if (b.type === 'stats') {
+      const n = b.stats.length;
+      const gap = 10;
+      const boxW = (innerWidth - gap * (n - 1)) / n;
+      b.stats.forEach((s, i) => {
+        const bx = right - boxW - i * (boxW + gap);
+        ctx.fillStyle = COLORS.primarySoft;
+        ctx.fillRect(bx, y, boxW, b.h - 8);
+        ctx.fillStyle = COLORS.primary;
+        ctx.font = 'bold 14px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(s, bx + boxW / 2, y + (b.h - 8) / 2 + 5);
+      });
+      ctx.textAlign = 'right';
+    } else if (b.type === 'divider') {
+      ctx.strokeStyle = COLORS.border;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.moveTo(margin, cy);
+      ctx.lineTo(width - margin, cy);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else if (b.type === 'exTitle') {
+      ctx.fillStyle = COLORS.text;
+      ctx.font = 'bold 17px Arial';
+      ctx.textAlign = 'right';
+      ctx.fillText(`🏋️ ${b.text}`, right, y + 24);
+    } else if (b.type === 'cardio') {
+      ctx.fillStyle = COLORS.rowAlt;
+      ctx.fillRect(margin, y, innerWidth, b.h - 6);
+      ctx.fillStyle = COLORS.text;
+      ctx.font = '14px Arial';
+      ctx.textAlign = 'right';
+      ctx.fillText(b.text, right - 10, y + (b.h - 6) / 2 + 5);
+    } else if (b.type === 'tableHeader') {
+      ctx.fillStyle = COLORS.primary;
+      ctx.fillRect(margin, y, innerWidth, b.h);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 13px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('סט', right - innerWidth * 0.15, y + b.h / 2 + 4);
+      ctx.fillText('ק"ג', right - innerWidth * 0.5, y + b.h / 2 + 4);
+      ctx.fillText('חזרות', right - innerWidth * 0.85, y + b.h / 2 + 4);
+      ctx.textAlign = 'right';
+    } else if (b.type === 'tableRow') {
+      if (b.i % 2 === 1) { ctx.fillStyle = COLORS.rowAlt; ctx.fillRect(margin, y, innerWidth, b.h); }
+      ctx.strokeStyle = COLORS.border;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(margin, y, innerWidth, b.h);
+      ctx.fillStyle = COLORS.text;
+      ctx.font = '14px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(String(b.i + 1), right - innerWidth * 0.15, y + b.h / 2 + 5);
+      ctx.fillText(String(b.weightKg), right - innerWidth * 0.5, y + b.h / 2 + 5);
+      ctx.fillText(String(b.reps), right - innerWidth * 0.85, y + b.h / 2 + 5);
+      ctx.textAlign = 'right';
+    } else if (b.type === 'footer') {
+      ctx.fillStyle = COLORS.muted;
+      ctx.font = '13px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(b.text, width / 2, y + 24);
+      ctx.textAlign = 'right';
+    }
+    y += b.h;
   });
+
   return canvas;
 }
 
