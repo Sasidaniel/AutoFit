@@ -121,19 +121,12 @@ function init() {
       }
     });
     if (migrated) db.saveExercises(exercises);
-    // One-time seed sync (adds any seed exercises introduced after this user's install
-    // that they don't already have, matched by name). Runs only once ever — after that,
-    // exercises the user renames or deletes stay renamed/deleted permanently, even if
-    // the name no longer matches a seed exercise.
+    // Exercises are never auto-added after first install. The user's saved list is the
+    // source of truth — renamed, deleted, or custom-named exercises are respected forever.
     if (!settings.seedSynced) {
-      const missing = SEED_EXERCISES.filter((s) => !exercises.some((ex) => ex.name === s.name));
-      if (missing.length) {
-        exercises = [...exercises, ...missing.map((e) => ({ id: db.uid(), active: true, ...e }))];
-        db.saveExercises(exercises);
-      }
+      settings.seedSynced = true;
+      db.saveSettings(settings);
     }
-    settings.seedSynced = true;
-    db.saveSettings(settings);
   }
   if (settings.restSeconds !== 120) {
     settings.restSeconds = 120;
