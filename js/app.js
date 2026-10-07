@@ -562,14 +562,23 @@ function renderWorkoutTab() {
 }
 
 function updateProgress(total, done) {
+  const strengthEntries = activeSession.entries.filter((e) => e.type !== 'cardio');
   if (total === undefined) {
-    const strengthEntries = activeSession.entries.filter((e) => e.type !== 'cardio');
     total = strengthEntries.reduce((a, e) => a + e.sets.length, 0);
     done = strengthEntries.reduce((a, e) => a + e.sets.filter((s) => s.completed).length, 0);
   }
   const pct = total ? Math.round((done / total) * 100) : 0;
   el('setsProgressText').textContent = `${done} / ${total} סטים הושלמו (${pct}%)`;
   el('setsProgressFill').style.width = `${pct}%`;
+
+  const totalEx = strengthEntries.length;
+  const doneEx = strengthEntries.filter((e) => e.sets.length && e.sets.every((s) => s.completed)).length;
+  const exPct = totalEx ? Math.round((doneEx / totalEx) * 100) : 0;
+  el('exProgressText').textContent = `${doneEx} / ${totalEx} תרגילים הושלמו (${exPct}%)`;
+  el('exProgressFill').style.width = `${exPct}%`;
+
+  // Overall workout percentage is based on sets completion (the finest-grained measure).
+  el('overallProgressBadge').textContent = `${pct}%`;
 }
 
 function renderCardioCard(entry) {

@@ -63,7 +63,10 @@ body { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
 .big-timer { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--primary); }
 .workout-controls { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
 
-.progress-summary { margin-top: 12px; }
+.progress-summary { margin-top: 12px; display: flex; align-items: center; gap: 14px; }
+.progress-rows { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.progress-row span { font-size: 13px; color: var(--text-muted); }
+.progress-overall { flex: none; width: 54px; height: 54px; border-radius: 50%; background: linear-gradient(135deg,#3b82f6,#60a5fa); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; box-shadow: var(--shadow); }
 .progress-bar { background: var(--surface-alt); border-radius: 8px; height: 10px; margin-top: 6px; overflow: hidden; }
 .progress-fill { background: linear-gradient(90deg,#3b82f6,#60a5fa); height: 100%; width: 0%; transition: width .25s ease; }
 
