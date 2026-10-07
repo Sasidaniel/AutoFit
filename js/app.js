@@ -16,15 +16,16 @@ let workouts = db.getWorkouts();
 const stopwatch = new Stopwatch((elapsed) => {
   el('workoutTimerDisplay').textContent = formatHMS(elapsed);
 });
+let restDoneMessage = 'אפשר להמשיך לסט הבא';
 const restTimer = new RestTimer({
   onTick: (remaining) => {
     el('restTimeDisplay').textContent = formatHMS(remaining);
   },
   onDone: () => {
     playBeep();
-    if (settings.voiceAnnouncements) speak('זמן המנוחה הסתיים. אפשר לבצע עוד סט');
+    if (settings.voiceAnnouncements) speak(`זמן המנוחה הסתיים. ${restDoneMessage}`);
     el('restOverlay').classList.add('hidden');
-    showToast('המנוחה הסתיימה — אפשר לעשות עוד סט! 💪');
+    showToast(`המנוחה הסתיימה — ${restDoneMessage} 💪`);
   },
 });
 
@@ -357,7 +358,8 @@ function renderWorkoutTab() {
         card.classList.toggle('done', entry.sets.every((s) => s.completed));
         if (set.completed) {
           if (!activeSession.running) el('btnStartWorkout').click();
-          startRestTimer(ex);
+          const exerciseDone = entry.sets.every((s) => s.completed);
+          startRestTimer(ex, exerciseDone);
         }
       });
 
@@ -404,10 +406,11 @@ function updateProgress(total, done) {
   el('setsProgressFill').style.width = `${pct}%`;
 }
 
-function startRestTimer(ex) {
+function startRestTimer(ex, exerciseDone) {
   const seconds = ex.restSeconds || settings.restSeconds || 90;
   el('restExerciseName').textContent = ex.name;
   el('restOverlay').classList.remove('hidden');
+  restDoneMessage = exerciseDone ? 'אפשר להמשיך לתרגיל הבא' : 'אפשר להמשיך לסט הבא';
   restTimer.start(seconds);
 }
 

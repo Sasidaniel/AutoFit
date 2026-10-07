@@ -1,5 +1,5 @@
 // service-worker.js — app shell caching for offline + installability
-const CACHE_NAME = 'fitness-tracker-v5';
+const CACHE_NAME = 'fitness-tracker-v6';
 const PRECACHE_URLS = [
   './',
   './index.html',
