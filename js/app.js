@@ -1131,9 +1131,9 @@ function sendWorkoutToHealthShortcut(workoutsArr) {
   // Health on the correct day even when sent later from history.
   const d = new Date(workoutsArr[0].dateISO);
   const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
-  // Single text blob: the Shortcut extracts the number and the date out of it via the
-  // built-in "Get Numbers from Input" / "Get Dates from Input" actions.
-  const text = `משך האימון: ${totalMinutes} דקות, בתאריך: ${dateStr}`;
+  // "|"-separated so the Shortcut splits it into exactly 2 clean parts — the duration
+  // part has no stray digits (unlike the date), so number/date extraction stays unambiguous.
+  const text = `${totalMinutes}|${dateStr}`;
   const url = `shortcuts://run-shortcut?name=${encodeURIComponent(HEALTH_SHORTCUT_NAME)}&input=text&text=${encodeURIComponent(text)}`;
   window.location.href = url;
   showToast(`נשלח ל-Shortcuts (${totalMinutes} דקות, ${dateStr}) — ודא שהקיצור "${HEALTH_SHORTCUT_NAME}" מוגדר ⌚`);
@@ -1146,17 +1146,19 @@ function openHealthSyncHelp() {
     <div class="photo-modal">
       <div class="photo-modal-head"><b>⌚ סנכרון לאפליקציית בריאות</b><button class="btn-icon btnCloseHealthHelp">✕</button></div>
       <div style="font-size:13px; line-height:1.9; color:var(--text);">
-        <p>דפדפן/אפליקציית אינטרנט לא יכולה לכתוב ישירות ל-HealthKit של אפל — זו הגבלה של אפל שתקפה לכל אתר, לא רק ל-AutoFit. הדרך הריאלית: קיצור (Shortcut) חד-פעמי שאתה יוצר, שמקבל טקסט מ-AutoFit (עם משך האימון והתאריך האמיתי שלו) ורושם את זה לבריאות.</p>
+        <p>דפדפן/אפליקציית אינטרנט לא יכולה לכתוב ישירות ל-HealthKit של אפל — זו הגבלה של אפל שתקפה לכל אתר, לא רק ל-AutoFit. הדרך הריאלית: קיצור (Shortcut) חד-פעמי שאתה יוצר, שמקבל טקסט מ-AutoFit (עם משך האימון והתאריך האמיתי שלו, מופרדים ב-"|") ורושם את זה לבריאות.</p>
         <p><b>הגדרה (פעם אחת):</b></p>
         <ol style="padding-right:18px; margin:0;">
           <li>פתח את אפליקציית <b>קיצורים (Shortcuts)</b> באייפון.</li>
           <li>צור קיצור חדש וקרא לו בדיוק: <b>${escapeHtml(HEALTH_SHORTCUT_NAME)}</b></li>
-          <li>הוסף פעולה <b>"קבלת מספרים מהקלט" (Get Numbers from Input)</b> — תפעל על "קלט הקיצור" (Shortcut Input) ותוציא ממנו את מספר הדקות.</li>
-          <li>הוסף פעולה <b>"קבלת תאריכים מהקלט" (Get Dates from Input)</b> — גם היא על "קלט הקיצור", ותוציא ממנו את התאריך האמיתי של האימון.</li>
+          <li>הוסף פעולה <b>"פיצול טקסט" (Split Text)</b> — על "קלט הקיצור" (Shortcut Input), עם מפריד מותאם אישית (Custom): <b>|</b></li>
+          <li>הוסף פעולה <b>"קבלת פריט מתוך רשימה" (Get Item from List)</b> — פריט מספר <b>1</b> (זה מספר הדקות).</li>
+          <li>הוסף פעולה נוספת <b>"קבלת פריט מתוך רשימה"</b> — פריט מספר <b>2</b> (זה התאריך).</li>
+          <li>הוסף פעולה <b>"קבלת תאריכים מהקלט" (Get Dates from Input)</b> — תפעל על התוצאה של "פריט 2" ותהפוך אותו לתאריך.</li>
           <li>הוסף פעולה <b>"רישום אימון" (Log Workout)</b>.</li>
           <li>בחר סוג אימון (למשל: אימון כוח פונקציונלי).</li>
           <li>בשדה <b>תאריך (Date)</b> הקש על הערך ובחר את התוצאה של "קבלת תאריכים מהקלט".</li>
-          <li>בשדה <b>משך (Duration)</b> הקש על הערך ובחר את התוצאה של "קבלת מספרים מהקלט", וודא שהיחידה מוגדרת לדקות.</li>
+          <li>בשדה <b>משך (Duration)</b> הקש על הערך ובחר את התוצאה של "פריט 1", וודא שהיחידה מוגדרת לדקות.</li>
           <li>שמור את הקיצור.</li>
         </ol>
         <p>חשוב: יש לבדוק את הקיצור רק דרך כפתור "שלח ל-Shortcuts" ב-AutoFit (למשל אחרי סיום אימון, או מההיסטוריה) — לא ע"י הפעלה ישירה בתוך אפליקציית הקיצורים, כי אז אין קלט בכלל והקיצור ייכשל.</p>
