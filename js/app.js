@@ -352,13 +352,23 @@ const CELEBRATION_MESSAGES = [
   'יפה מאוד! עקביות היא המפתח — תמשיך ככה 🏆',
   'סיימת חזק! מנוחה טובה ומחר ממשיכים 🚀',
 ];
-function showCelebration() {
+function showCelebration(record) {
   const msg = CELEBRATION_MESSAGES[Math.floor(Math.random() * CELEBRATION_MESSAGES.length)];
   const overlay = document.createElement('div');
   overlay.className = 'celebration-overlay';
-  overlay.innerHTML = `<div class="celebration-card"><div class="celebration-emoji">🎉</div><div class="celebration-text">${escapeHtml(msg)}</div></div>`;
-  overlay.addEventListener('click', () => overlay.remove());
+  overlay.innerHTML = `<div class="celebration-card">
+    <div class="celebration-emoji">🎉</div>
+    <div class="celebration-text">${escapeHtml(msg)}</div>
+    ${record ? '<button class="btn btn-secondary btn-small btnSendHealth" style="margin-top:14px;">📲 שלח ל-Shortcuts (לבריאות)</button>' : ''}
+  </div>`;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   document.body.appendChild(overlay);
+  if (record) {
+    qs('.btnSendHealth', overlay).addEventListener('click', (e) => {
+      e.stopPropagation();
+      sendWorkoutToHealthShortcut([record]);
+    });
+  }
   setTimeout(() => overlay.remove(), 5000);
 }
 
@@ -396,7 +406,7 @@ function finishWorkout() {
     workouts.push(record);
     db.saveWorkouts(workouts);
     showToast('האימון נשמר בהיסטוריה ✅');
-    showCelebration();
+    showCelebration(record);
   } else {
     showToast('האימון בוטל (לא הושלם אף סט)');
   }
@@ -1105,6 +1115,47 @@ async function shareFile(blob, filename, mime) {
   showToast('הקובץ הורד — אפשר לצרף ולשלוח אותו ידנית במייל/וואטסאפ');
 }
 
+// ---- Apple Health sync (via a one-time user-created Shortcuts automation) ----
+// A web app/PWA cannot write to HealthKit directly — only native, App-Store-signed
+// apps have that entitlement. The closest real bridge is: hand the workout's
+// duration to the iOS Shortcuts app (which *can* log a workout to Health), via its
+// `shortcuts://run-shortcut` URL scheme. This requires the user to create a small
+// Shortcut once (see openHealthSyncHelp for the exact steps).
+const HEALTH_SHORTCUT_NAME = 'AutoFit לבריאות';
+
+function sendWorkoutToHealthShortcut(workoutsArr) {
+  const totalMinutes = Math.max(1, Math.round(workoutsArr.reduce((a, w) => a + w.durationSec, 0) / 60));
+  const url = `shortcuts://run-shortcut?name=${encodeURIComponent(HEALTH_SHORTCUT_NAME)}&input=text&text=${encodeURIComponent(String(totalMinutes))}`;
+  window.location.href = url;
+  showToast(`נשלח ל-Shortcuts (${totalMinutes} דקות) — ודא שהקיצור "${HEALTH_SHORTCUT_NAME}" מוגדר ⌚`);
+}
+
+function openHealthSyncHelp() {
+  const overlay = document.createElement('div');
+  overlay.className = 'photo-overlay';
+  overlay.innerHTML = `
+    <div class="photo-modal">
+      <div class="photo-modal-head"><b>⌚ סנכרון לאפליקציית בריאות</b><button class="btn-icon btnCloseHealthHelp">✕</button></div>
+      <div style="font-size:13px; line-height:1.9; color:var(--text);">
+        <p>דפדפן/אפליקציית אינטרנט לא יכולה לכתוב ישירות ל-HealthKit של אפל — זו הגבלה של אפל שתקפה לכל אתר, לא רק ל-AutoFit. הדרך הריאלית: קיצור (Shortcut) חד-פעמי שאתה יוצר, שמקבל את משך האימון מ-AutoFit ורושם אותו לבריאות.</p>
+        <p><b>הגדרה (פעם אחת):</b></p>
+        <ol style="padding-right:18px; margin:0;">
+          <li>פתח את אפליקציית <b>קיצורים (Shortcuts)</b> באייפון.</li>
+          <li>צור קיצור חדש וקרא לו בדיוק: <b>${escapeHtml(HEALTH_SHORTCUT_NAME)}</b></li>
+          <li>הוסף פעולה <b>"רישום אימון" (Log Workout)</b>.</li>
+          <li>בחר סוג אימון (למשל: אימון כוח פונקציונלי).</li>
+          <li>בשדה <b>משך (Duration)</b> הקש על הערך ובחר <b>"קלט הקיצור" (Shortcut Input)</b>, וודא שהיחידה מוגדרת לדקות.</li>
+          <li>שמור את הקיצור.</li>
+        </ol>
+        <p>מעכשיו, בכל לחיצה על "שלח ל-Shortcuts" מ-AutoFit, משך האימון יועבר אוטומטית ויירשם בבריאות.</p>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  qs('.btnCloseHealthHelp', overlay).addEventListener('click', () => overlay.remove());
+}
+
 function openShareModal(workoutsArr) {
   const list = Array.isArray(workoutsArr) ? workoutsArr : [workoutsArr];
   const title = list.length > 1 ? `שיתוף ${list.length} אימונים` : `שיתוף אימון — ${formatDate(list[0].dateISO)}`;
@@ -1116,6 +1167,10 @@ function openShareModal(workoutsArr) {
       <div class="settings-actions" style="flex-direction:column;">
         <button class="btn btn-primary" id="sharePdf">📄 שתף כ-PDF (למייל/וואטסאפ)</button>
         <button class="btn btn-secondary" id="shareImage">🖼️ שתף כתמונה (למייל/וואטסאפ)</button>
+        <div style="display:flex; gap:6px;">
+          <button class="btn btn-secondary" id="sendHealth" style="flex:1;">⌚ שלח ל-Shortcuts (לבריאות)</button>
+          <button class="btn-icon btnHealthHelp" title="איך זה עובד?">ℹ️</button>
+        </div>
       </div>
     </div>
   `;
@@ -1132,6 +1187,14 @@ function openShareModal(workoutsArr) {
     const blob = await buildWorkoutShareImage(list);
     await shareFile(blob, `autofit-${Date.now()}.png`, 'image/png');
     close();
+  });
+  qs('#sendHealth', overlay).addEventListener('click', () => {
+    sendWorkoutToHealthShortcut(list);
+    close();
+  });
+  qs('.btnHealthHelp', overlay).addEventListener('click', (e) => {
+    e.stopPropagation();
+    openHealthSyncHelp();
   });
 }
 
