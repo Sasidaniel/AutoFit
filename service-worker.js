@@ -1,5 +1,5 @@
 // service-worker.js — app shell caching for offline + installability
-const CACHE_NAME = 'fitness-tracker-v8';
+const CACHE_NAME = 'fitness-tracker-v9';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -19,7 +19,7 @@ const PRECACHE_URLS = [
   './images/p6_1.png', './images/p6_2.png',
   './images/p7_1.png', './images/p7_2.png', './images/p7_3.png',
   './images/p8_1.png', './images/p8_2.png', './images/p8_3.png',
-  './images/ex_plank.png', './images/ex_shrugs.png',
+  './images/ex_plank.png', './images/ex_shrugs.png', './images/ex_hammer.png',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js',
 ];
 

@@ -1,6 +1,6 @@
 {
-  "name": "מעקב כושר - אימוני כוח",
-  "short_name": "מעקב כושר",
+  "name": "AutoFit - Sasi Daniel",
+  "short_name": "AutoFit",
   "description": "אפליקציית מעקב אימוני כוח עם טיימרים, היסטוריה ודשבורד",
   "start_url": "./index.html",
   "scope": "./",

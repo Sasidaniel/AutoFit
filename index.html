@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-<title>מעקב כושר</title>
+<title>AutoFit</title>
 <meta name="theme-color" content="#101217">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="מעקב כושר">
+<meta name="apple-mobile-web-app-title" content="AutoFit">
 <meta name="mobile-web-app-capable" content="yes">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -17,7 +17,7 @@
 <body>
 
 <header class="topbar">
-  <div class="brand">💪 מעקב כושר</div>
+  <div id="appBrand" class="brand">💪 AutoFit</div>
   <div id="liveClock" class="live-clock"></div>
 </header>
 
@@ -81,6 +81,28 @@
     <div id="exerciseManageList" class="exercise-manage-list"></div>
   </section>
 
+  <!-- PERSONAL AREA TAB -->
+  <section id="tab-profile" class="tab-panel">
+    <h2 class="section-title">אזור אישי</h2>
+    <div class="card">
+      <label class="field-label">שם המתאמן</label>
+      <input class="input" id="profileName" placeholder="לדוגמה: ששי דניאל">
+
+      <label class="field-label">גיל</label>
+      <input type="number" min="1" class="input" id="profileAge" placeholder="גיל">
+
+      <label class="field-label">גובה (ס"מ)</label>
+      <input type="number" min="1" class="input" id="profileHeight" placeholder="גובה בס&quot;מ">
+
+      <label class="field-label">משקל (ק"ג)</label>
+      <input type="number" min="1" step="0.1" class="input" id="profileWeight" placeholder="משקל בק&quot;ג">
+
+      <div class="settings-actions">
+        <button id="btnSaveProfile" class="btn btn-primary">שמור</button>
+      </div>
+    </div>
+  </section>
+
   <!-- SETTINGS TAB -->
   <section id="tab-settings" class="tab-panel">
     <h2 class="section-title">הגדרות</h2>
@@ -100,6 +122,11 @@
       <div class="field-hint">💡 המסך אמור להישאר דלוק אוטומטית כל עוד האתר פתוח (דורש iOS 16.4+ / דפדפן תומך). אם המסך עדיין נכבה, גע במסך פעם אחת כדי להפעיל זאת.</div>
 
       <div class="settings-actions">
+        <button id="btnEnableNotifications" class="btn btn-secondary">🔔 אפשר התראות</button>
+      </div>
+      <div class="field-hint">מאפשר התראת מערכת (גם אם יצאת מהאפליקציה לרגע) בסיום מנוחה/חימום/שחרור. דורש אישור חד-פעמי, ועדיין תלוי במגבלות iOS כשהמסך נעול לגמרי לאורך זמן.</div>
+
+      <div class="settings-actions">
         <button id="btnExportData" class="btn btn-secondary">ייצוא גיבוי (JSON)</button>
         <button id="btnImportData" class="btn btn-secondary">ייבוא גיבוי</button>
         <input type="file" id="importFileInput" accept="application/json" class="hidden">
@@ -112,16 +139,16 @@
 
 </main>
 
-<!-- REST TIMER OVERLAY -->
-<div id="restOverlay" class="rest-overlay hidden">
-  <div class="rest-card">
+<!-- REST TIMER BAR (floating, non-blocking — the app stays usable while resting) -->
+<div id="restOverlay" class="rest-bar hidden">
+  <div class="rest-bar-info">
     <div class="rest-label">מנוחה</div>
     <div id="restTimeDisplay" class="rest-time">01:30</div>
     <div id="restExerciseName" class="rest-exercise"></div>
-    <div class="rest-actions">
-      <button id="btnRestAdd15" class="btn btn-secondary">+15 שנ'</button>
-      <button id="btnSkipRest" class="btn btn-primary">דלג / סיום מנוחה</button>
-    </div>
+  </div>
+  <div class="rest-actions">
+    <button id="btnRestAdd15" class="btn btn-secondary btn-small">+15 שנ'</button>
+    <button id="btnSkipRest" class="btn btn-primary btn-small">דלג</button>
   </div>
 </div>
 
@@ -130,6 +157,7 @@
   <button class="tab-btn" data-tab="history"><span>📅</span><span>היסטוריה</span></button>
   <button class="tab-btn" data-tab="dashboard"><span>📊</span><span>דשבורד</span></button>
   <button class="tab-btn" data-tab="exercises"><span>📋</span><span>תרגילים</span></button>
+  <button class="tab-btn" data-tab="profile"><span>👤</span><span>אישי</span></button>
   <button class="tab-btn" data-tab="settings"><span>⚙️</span><span>הגדרות</span></button>
 </nav>
 

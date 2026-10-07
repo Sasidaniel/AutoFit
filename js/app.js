@@ -10,8 +10,11 @@ function round2(n) { return Math.round(n * 100) / 100; }
 /* ---------------- state ---------------- */
 let exercises = [];
 let settings = db.getSettings();
+let profile = db.getProfile();
 let activeSession = db.getActiveSession(); // { id, startedAt, accumulatedSec, running, entries: [...] }
 let workouts = db.getWorkouts();
+// transient (not persisted) running hold-timers for hold-type exercises (e.g. plank), keyed by "exerciseId:setIdx"
+const holdTimers = new Map();
 
 const stopwatch = new Stopwatch((elapsed) => {
   el('workoutTimerDisplay').textContent = formatHMS(elapsed);
@@ -26,8 +29,27 @@ const restTimer = new RestTimer({
     if (settings.voiceAnnouncements) speak(`זמן המנוחה הסתיים. ${restDoneMessage}`);
     el('restOverlay').classList.add('hidden');
     showToast(`המנוחה הסתיימה — ${restDoneMessage} 💪`);
+    notify('זמן המנוחה הסתיים', restDoneMessage);
   },
 });
+
+/* ---------------- notifications (best-effort background alerts) ----------------
+   iOS/Safari suspends page JS when the app is fully backgrounded or the screen is
+   locked, so a true "always fires on time" background alert needs a push server.
+   As a best effort: request permission up-front, fire a system Notification whenever
+   a timer completes (shows even if the user briefly switched apps/tabs), and
+   force every timer to re-check itself the instant the page becomes visible again. */
+function requestNotificationPermission() {
+  if (!('Notification' in window)) { showToast('התראות מערכת לא נתמכות בדפדפן הזה'); return; }
+  if (Notification.permission === 'granted') { showToast('התראות כבר מאושרות ✅'); return; }
+  Notification.requestPermission().then((perm) => {
+    showToast(perm === 'granted' ? 'התראות אושרו ✅' : 'התראות נחסמו — אפשר לשנות בהגדרות הדפדפן');
+  }).catch(() => {});
+}
+function notify(title, body) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try { new Notification(title, { body, icon: 'icons/icon-192.png', tag: 'autofit-timer' }); } catch (e) { /* noop */ }
+}
 
 let wakeLockRef = null;
 async function requestWakeLock() {
@@ -50,6 +72,7 @@ document.addEventListener('visibilitychange', () => {
       stopwatch.forceTick();
     }
     if (restTimer.isRunning()) restTimer.forceTick();
+    tickCardioTimers();
     requestWakeLock();
   }
 });
@@ -64,15 +87,24 @@ function qsa(sel, parent = document) { return Array.from(parent.querySelectorAll
 function init() {
   exercises = db.getExercises();
   if (!exercises.length) {
-    exercises = SEED_EXERCISES.map((e) => ({ id: db.uid(), ...e }));
+    exercises = SEED_EXERCISES.map((e) => ({ id: db.uid(), active: true, ...e }));
     db.saveExercises(exercises);
   } else {
-    // migrate older saved exercises that don't have an images field yet
+    // migrate older saved exercises that are missing newer fields (images, hold-type, active flag)
     let migrated = false;
     exercises.forEach((ex) => {
-      if (!ex.images) {
-        const match = SEED_EXERCISES.find((s) => s.name === ex.name);
-        ex.images = match ? match.images : [];
+      const match = SEED_EXERCISES.find((s) => s.name === ex.name);
+      if (!ex.images || (ex.images.length === 0 && match && match.images && match.images.length)) {
+        ex.images = match ? match.images : (ex.images || []);
+        migrated = true;
+      }
+      if (match && match.inputType && !ex.inputType) {
+        ex.inputType = match.inputType;
+        ex.holdSeconds = match.holdSeconds;
+        migrated = true;
+      }
+      if (ex.active === undefined) {
+        ex.active = true;
         migrated = true;
       }
       if (ex.restSeconds !== 120) {
@@ -84,7 +116,7 @@ function init() {
     // add any newly introduced seed exercises (by name) that aren't in the user's saved list yet
     const missing = SEED_EXERCISES.filter((s) => !exercises.some((ex) => ex.name === s.name));
     if (missing.length) {
-      exercises = [...exercises, ...missing.map((e) => ({ id: db.uid(), ...e }))];
+      exercises = [...exercises, ...missing.map((e) => ({ id: db.uid(), active: true, ...e }))];
       db.saveExercises(exercises);
     }
   }
@@ -105,8 +137,8 @@ function init() {
       activeSession.entries.push(makeCardioEntry('cooldown'));
       sessionMigrated = true;
     }
-    // add newly introduced exercises to the in-progress session too (before the cool-down walk)
-    exercises.forEach((ex) => {
+    // add newly introduced *active* exercises to the in-progress session too (before the cool-down walk)
+    exercises.filter((ex) => ex.active !== false).forEach((ex) => {
       if (!activeSession.entries.some((e) => e.exerciseId === ex.id)) {
         const cooldownIdx = activeSession.entries.findIndex((e) => e.exerciseId === 'cooldown');
         const newEntry = {
@@ -126,6 +158,8 @@ function init() {
   wireWorkoutControls();
   wireSettings();
   wireExercisesTab();
+  wireProfileTab();
+  renderBrand();
   startLiveClock();
   setInterval(tickCardioTimers, 1000);
 
@@ -133,6 +167,7 @@ function init() {
   renderHistoryTab();
   renderExercisesTab();
   renderSettingsTab();
+  renderProfileTab();
 
   // keep the phone screen on the whole time the site is open, not just during a workout
   requestWakeLock();
@@ -193,7 +228,7 @@ function buildDraftSession() {
     running: false,
     entries: [
       makeCardioEntry('warmup'),
-      ...exercises.map((ex) => ({
+      ...exercises.filter((ex) => ex.active !== false).map((ex) => ({
         exerciseId: ex.id,
         exerciseName: ex.name,
         sets: Array.from({ length: setsForWeek(ex) }, (_, i) => {
@@ -257,13 +292,7 @@ function getLastCompletedValuesByExercise() {
 function wireWorkoutControls() {
   el('btnStartWorkout').addEventListener('click', () => {
     primeSpeech();
-    activeSession.running = true;
-    activeSession.startedAt = activeSession.startedAt || new Date().toISOString();
-    persistActiveSession();
-    stopwatch.start(new Date(activeSession.startedAt).getTime());
-    requestWakeLock();
-    el('btnStartWorkout').classList.add('hidden');
-    el('btnFinishWorkout').classList.remove('hidden');
+    ensureWorkoutStarted();
   });
 
   el('btnFinishWorkout').addEventListener('click', () => {
@@ -276,6 +305,36 @@ function wireWorkoutControls() {
     el('restOverlay').classList.add('hidden');
   });
   el('btnRestAdd15').addEventListener('click', () => restTimer.addSeconds(15));
+}
+
+// Starts the overall workout stopwatch the moment ANY activity begins (warm-up,
+// a set, etc.) so history always reflects the true total workout duration.
+function ensureWorkoutStarted() {
+  if (activeSession.running) return;
+  activeSession.running = true;
+  activeSession.startedAt = activeSession.startedAt || new Date().toISOString();
+  persistActiveSession();
+  stopwatch.start(new Date(activeSession.startedAt).getTime());
+  requestWakeLock();
+  el('btnStartWorkout').classList.add('hidden');
+  el('btnFinishWorkout').classList.remove('hidden');
+}
+
+const CELEBRATION_MESSAGES = [
+  'כל הכבוד על האימון וההתקדמות! תמשיך כך 💪',
+  'אימון מעולה! עוד צעד קדימה למטרה שלך 🔥',
+  'וואו, סיימת את זה! הגוף שלך מודה לך 🙌',
+  'יפה מאוד! עקביות היא המפתח — תמשיך ככה 🏆',
+  'סיימת חזק! מנוחה טובה ומחר ממשיכים 🚀',
+];
+function showCelebration() {
+  const msg = CELEBRATION_MESSAGES[Math.floor(Math.random() * CELEBRATION_MESSAGES.length)];
+  const overlay = document.createElement('div');
+  overlay.className = 'celebration-overlay';
+  overlay.innerHTML = `<div class="celebration-card"><div class="celebration-emoji">🎉</div><div class="celebration-text">${escapeHtml(msg)}</div></div>`;
+  overlay.addEventListener('click', () => overlay.remove());
+  document.body.appendChild(overlay);
+  setTimeout(() => overlay.remove(), 5000);
 }
 
 function finishWorkout() {
@@ -312,6 +371,7 @@ function finishWorkout() {
     workouts.push(record);
     db.saveWorkouts(workouts);
     showToast('האימון נשמר בהיסטוריה ✅');
+    showCelebration();
   } else {
     showToast('האימון בוטל (לא הושלם אף סט)');
   }
@@ -357,7 +417,7 @@ function renderWorkoutTab() {
         <span class="exercise-num">${exerciseNumber}</span>
         <div>
           <div class="exercise-name">${escapeHtml(ex.name)}</div>
-          <div class="exercise-meta">${escapeHtml(ex.defaultReps)} חזרות &middot; ${escapeHtml(ex.notes || '')}</div>
+          <div class="exercise-meta">${ex.inputType === 'hold' ? `החזקה: ${ex.holdSeconds || 15} שניות` : `${escapeHtml(ex.defaultReps)} חזרות`} &middot; ${escapeHtml(ex.notes || '')}</div>
         </div>
       </div>
       <div class="exercise-head-right">
@@ -372,8 +432,9 @@ function renderWorkoutTab() {
 
     const table = document.createElement('table');
     table.className = 'sets-table';
+    const repsHeader = ex.inputType === 'hold' ? 'זמן' : 'חזרות';
     table.innerHTML = `<thead><tr>
-        <th></th><th>סט</th><th>ק"ג</th><th>lbs</th><th>חזרות</th><th>✓</th>
+        <th>סט</th><th>ק"ג</th><th>lbs</th><th>${repsHeader}</th><th>✓</th>
       </tr></thead>`;
     const tbody = document.createElement('tbody');
 
@@ -381,17 +442,18 @@ function renderWorkoutTab() {
       const tr = document.createElement('tr');
       tr.className = 'set-row' + (set.completed ? ' completed' : '');
       const lbsVal = set.weightKg ? round1(Number(set.weightKg) * KG_TO_LBS) : '';
+      const repsCell = ex.inputType === 'hold'
+        ? '<td class="hold-cell"></td>'
+        : `<td><input type="number" inputmode="numeric" class="set-input reps" value="${set.reps}" placeholder="0"></td>`;
       tr.innerHTML = `
-        <td class="set-num">—</td>
         <td class="set-num">${idx + 1}</td>
         <td><input type="number" inputmode="decimal" class="set-input weight" value="${set.weightKg}" placeholder="0"></td>
         <td><input type="number" inputmode="decimal" class="set-input lbs" value="${lbsVal}" placeholder="0"></td>
-        <td><input type="number" inputmode="numeric" class="set-input reps" value="${set.reps}" placeholder="0"></td>
+        ${repsCell}
         <td><button class="set-check ${set.completed ? 'checked' : ''}" aria-label="סט הושלם"></button></td>
       `;
       const weightInput = qs('.weight', tr);
       const lbsInput = qs('.lbs', tr);
-      const repsInput = qs('.reps', tr);
       const checkBtn = qs('.set-check', tr);
 
       weightInput.addEventListener('input', () => {
@@ -405,10 +467,25 @@ function renderWorkoutTab() {
         weightInput.value = kgVal;
         persistActiveSession();
       });
-      repsInput.addEventListener('input', () => {
-        set.reps = repsInput.value;
-        persistActiveSession();
-      });
+
+      if (ex.inputType === 'hold') {
+        renderHoldCell(qs('.hold-cell', tr), ex, entry, set, idx, () => {
+          checkBtn.classList.add('checked');
+          tr.classList.add('completed');
+          persistActiveSession();
+          updateProgress();
+          card.classList.toggle('done', entry.sets.every((s) => s.completed));
+          const exerciseDone = entry.sets.every((s) => s.completed);
+          startRestTimer(ex, exerciseDone);
+        });
+      } else {
+        const repsInput = qs('.reps', tr);
+        repsInput.addEventListener('input', () => {
+          set.reps = repsInput.value;
+          persistActiveSession();
+        });
+      }
+
       checkBtn.addEventListener('click', () => {
         set.completed = !set.completed;
         checkBtn.classList.toggle('checked', set.completed);
@@ -417,7 +494,7 @@ function renderWorkoutTab() {
         updateProgress();
         card.classList.toggle('done', entry.sets.every((s) => s.completed));
         if (set.completed) {
-          if (!activeSession.running) el('btnStartWorkout').click();
+          ensureWorkoutStarted();
           const exerciseDone = entry.sets.every((s) => s.completed);
           startRestTimer(ex, exerciseDone);
         }
@@ -499,6 +576,7 @@ function renderCardioCard(entry) {
       entry.durationSec = Math.max(0, entry.durationSec - elapsed);
       entry.startedAt = null;
     } else {
+      ensureWorkoutStarted();
       entry.completed = false;
       entry.startedAt = Date.now();
     }
@@ -536,12 +614,72 @@ function tickCardioTimers() {
       const msg = entry.exerciseId === 'warmup' ? 'החימום הסתיים' : 'השחרור הסתיים';
       if (settings.voiceAnnouncements) speak(msg);
       showToast(`${msg} ✅`);
+      notify('AutoFit', msg);
       needsRerender = true;
     } else if (span) {
       span.textContent = formatHMS(remaining);
     }
   });
   if (needsRerender) renderWorkoutTab();
+}
+
+/* ---- hold-type (e.g. plank) per-set timer: start -> counts up -> beeps/announces at
+   the target duration so the trainee knows when to stop -> stop records the achieved
+   duration, auto-checks the set, and kicks off the normal rest timer for the next rep ---- */
+function startHoldTicking(display, startedAt, target) {
+  return setInterval(() => {
+    const elapsed = (Date.now() - startedAt) / 1000;
+    display.textContent = formatHMS(elapsed);
+    if (elapsed >= target && !display.classList.contains('reached')) {
+      display.classList.add('reached');
+      playBeep();
+      if (settings.voiceAnnouncements) speak(`${target} שניות הושלמו, אפשר לעצור`);
+      notify('AutoFit', `${target} שניות הושלמו — אפשר לעצור`);
+    }
+  }, 250);
+}
+function renderHoldCell(td, ex, entry, set, idx, onAutoComplete) {
+  const key = `${entry.exerciseId}:${idx}`;
+  if (set.completed) {
+    const state = holdTimers.get(key);
+    if (state) { clearInterval(state.intervalId); holdTimers.delete(key); }
+    td.innerHTML = `<div class="hold-timer-cell"><span class="hold-result">${escapeHtml(String(set.reps || ex.holdSeconds || 15))} שנ'</span><button class="hold-reset" title="מדוד שוב">↺</button></div>`;
+    qs('.hold-reset', td).addEventListener('click', () => {
+      set.completed = false;
+      set.reps = '';
+      persistActiveSession();
+      renderWorkoutTab();
+    });
+    return;
+  }
+  const target = ex.holdSeconds || 15;
+  const existing = holdTimers.get(key);
+  const running = !!existing;
+  td.innerHTML = `<div class="hold-timer-cell"><span class="hold-timer-display">${running ? formatHMS((Date.now() - existing.startedAt) / 1000) : '0:00'}</span><button class="btn-hold-toggle${running ? ' running' : ''}">${running ? '⏹ עצור' : '▶ התחל'}</button></div>`;
+  const display = qs('.hold-timer-display', td);
+  const btn = qs('.btn-hold-toggle', td);
+  if (existing) {
+    clearInterval(existing.intervalId); // old interval pointed at now-detached DOM — rebind to the fresh element
+    holdTimers.set(key, { intervalId: startHoldTicking(display, existing.startedAt, target), startedAt: existing.startedAt });
+  }
+  btn.addEventListener('click', () => {
+    const state = holdTimers.get(key);
+    if (state) {
+      clearInterval(state.intervalId);
+      holdTimers.delete(key);
+      set.reps = Math.round((Date.now() - state.startedAt) / 1000);
+      set.completed = true;
+      persistActiveSession();
+      onAutoComplete();
+      renderWorkoutTab();
+    } else {
+      ensureWorkoutStarted();
+      const startedAt = Date.now();
+      holdTimers.set(key, { intervalId: startHoldTicking(display, startedAt, target), startedAt });
+      btn.textContent = '⏹ עצור';
+      btn.classList.add('running');
+    }
+  });
 }
 
 function startRestTimer(ex, exerciseDone) {
@@ -721,7 +859,7 @@ function renderStatsGrid() {
     { label: 'זמן ממוצע', value: formatHMS(avgDuration) },
     { label: 'רצף שבועות', value: streak },
     { label: `השבוע (יעד ${settings.weeklyGoal})`, value: `${weekCount}/${settings.weeklyGoal}` },
-    { label: 'סטים כולל', value: workouts.reduce((a, w) => a + w.entries.reduce((b, e) => b + e.sets.length, 0), 0) },
+    { label: 'סטים כולל', value: workouts.reduce((a, w) => a + w.entries.reduce((b, e) => b + (e.type === 'cardio' ? 0 : e.sets.length), 0), 0) },
   ];
   grid.innerHTML = stats.map((s) => `
     <div class="stat-box"><div class="stat-value">${s.value}</div><div class="stat-label">${s.label}</div></div>
@@ -838,9 +976,8 @@ function chartBaseOptions() {
 /* ================= EXERCISES TAB ================= */
 function wireExercisesTab() {
   el('btnAddExercise').addEventListener('click', () => {
-    exercises.push({ id: db.uid(), name: 'תרגיל חדש', category: 'כללי', defaultSets: 3, defaultReps: '12-15', restSeconds: 120, notes: '' });
-    db.saveExercises(exercises);
-    renderExercisesTab();
+    const draft = { id: db.uid(), name: '', category: 'כללי', defaultSets: 3, defaultReps: '12-15', restSeconds: 120, notes: '', images: [], active: true };
+    openExerciseEditModal(draft, { isNew: true });
   });
 }
 
@@ -849,7 +986,7 @@ function renderExercisesTab() {
   list.innerHTML = '';
   exercises.forEach((ex) => {
     const item = document.createElement('div');
-    item.className = 'exercise-manage-item sortable-item';
+    item.className = 'exercise-manage-item sortable-item' + (ex.active === false ? ' inactive' : '');
     item.dataset.id = ex.id;
     item.innerHTML = `
       <div class="exercise-manage-head">
@@ -858,6 +995,7 @@ function renderExercisesTab() {
           <div>
             <b>${escapeHtml(ex.name)}</b>
             <div class="exercise-meta">${escapeHtml(ex.category)} &middot; ${ex.defaultSets} סטים × ${escapeHtml(ex.defaultReps)}</div>
+            <label class="checkbox-row ex-active-toggle"><input type="checkbox" class="exActiveCheck" ${ex.active !== false ? 'checked' : ''}> כלול באימון</label>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:4px;">
@@ -873,6 +1011,14 @@ function renderExercisesTab() {
       exercises = exercises.filter((e) => e.id !== ex.id);
       db.saveExercises(exercises);
       renderExercisesTab();
+      reorderActiveSessionToMatchExercises();
+    });
+    qs('.exActiveCheck', item).addEventListener('change', (e) => {
+      ex.active = e.target.checked;
+      db.saveExercises(exercises);
+      renderExercisesTab();
+      reorderActiveSessionToMatchExercises();
+      showToast(ex.active ? `"${ex.name}" ייכלל באימונים הבאים` : `"${ex.name}" לא ייכלל באימונים הבאים (נשאר שמור)`);
     });
     const photoBtnManage = qs('.btnShowPhotoManage', item);
     if (photoBtnManage) photoBtnManage.addEventListener('click', () => openPhotoModal(ex));
@@ -886,24 +1032,75 @@ function renderExercisesTab() {
   });
 }
 
-function openExerciseEditModal(ex) {
+/* ---- image upload helper: downsizes to keep localStorage small ---- */
+function fileToResizedDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 800;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const scale = maxDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function openExerciseEditModal(ex, options = {}) {
+  const isNew = !!options.isNew;
+  let currentImages = [...(ex.images || [])];
+  let inputType = ex.inputType || 'reps';
   const overlay = document.createElement('div');
   overlay.className = 'photo-overlay';
   overlay.innerHTML = `
     <div class="photo-modal">
-      <div class="photo-modal-head"><b>עריכת תרגיל</b><button class="btn-icon btnCloseExEdit">✕</button></div>
+      <div class="photo-modal-head"><b>${isNew ? 'תרגיל חדש' : 'עריכת תרגיל'}</b><button class="btn-icon btnCloseExEdit">✕</button></div>
       <label class="field-label">שם התרגיל</label>
-      <input class="input" id="editExName" value="${escapeAttr(ex.name)}">
+      <input class="input" id="editExName" value="${escapeAttr(ex.name)}" placeholder="שם התרגיל">
       <label class="field-label">קבוצת שריר</label>
       <input class="input" id="editExCategory" value="${escapeAttr(ex.category)}">
       <label class="field-label">סטים ברירת מחדל</label>
       <input type="number" min="1" class="input" id="editExSets" value="${ex.defaultSets}">
-      <label class="field-label">חזרות</label>
-      <input class="input" id="editExReps" value="${escapeAttr(ex.defaultReps)}">
+      <label class="field-label">סוג מדידה</label>
+      <select class="select" id="editExInputType">
+        <option value="reps" ${inputType === 'reps' ? 'selected' : ''}>חזרות</option>
+        <option value="hold" ${inputType === 'hold' ? 'selected' : ''}>החזקה בזמן (שניות)</option>
+      </select>
+      <div id="editExRepsWrap">
+        <label class="field-label">חזרות</label>
+        <input class="input" id="editExReps" value="${escapeAttr(ex.defaultReps)}">
+      </div>
+      <div id="editExHoldWrap" class="hidden">
+        <label class="field-label">זמן יעד להחזקה (שניות)</label>
+        <input type="number" min="1" class="input" id="editExHoldSeconds" value="${ex.holdSeconds || 15}">
+      </div>
       <label class="field-label">מנוחה (שניות)</label>
       <input type="number" min="10" class="input" id="editExRest" value="${ex.restSeconds}">
       <label class="field-label">הערות</label>
       <input class="input" id="editExNotes" value="${escapeAttr(ex.notes || '')}">
+      <label class="checkbox-row"><input type="checkbox" id="editExActive" ${ex.active !== false ? 'checked' : ''}> כלול באימונים הבאים</label>
+
+      <label class="field-label">תמונות</label>
+      <div class="image-manage-grid" id="editExImageGrid"></div>
+      <input type="file" accept="image/*" id="editExImageInput" class="hidden">
+      <div class="settings-actions">
+        <button class="btn btn-secondary btn-small" id="btnAddExImage">📷 העלה תמונה</button>
+      </div>
+
       <div class="settings-actions">
         <button class="btn btn-primary" id="btnSaveExEdit">שמור</button>
         <button class="btn btn-secondary" id="btnCancelExEdit">ביטול</button>
@@ -911,22 +1108,73 @@ function openExerciseEditModal(ex) {
     </div>
   `;
   document.body.appendChild(overlay);
+
+  function renderImageGrid() {
+    const grid = qs('#editExImageGrid', overlay);
+    grid.innerHTML = currentImages.map((src, i) => `
+      <div class="image-manage-thumb"><img src="${src}"><button class="btnRemoveImg" data-i="${i}">✕</button></div>
+    `).join('') || '<div class="exercise-meta">אין תמונות עדיין</div>';
+    qsa('.btnRemoveImg', grid).forEach((btn) => {
+      btn.addEventListener('click', () => {
+        currentImages.splice(Number(btn.dataset.i), 1);
+        renderImageGrid();
+      });
+    });
+  }
+  renderImageGrid();
+
+  qs('#editExInputType', overlay).addEventListener('change', (e) => {
+    inputType = e.target.value;
+    qs('#editExRepsWrap', overlay).classList.toggle('hidden', inputType === 'hold');
+    qs('#editExHoldWrap', overlay).classList.toggle('hidden', inputType !== 'hold');
+  });
+  qs('#editExInputType', overlay).dispatchEvent(new Event('change'));
+
+  qs('#btnAddExImage', overlay).addEventListener('click', () => qs('#editExImageInput', overlay).click());
+  qs('#editExImageInput', overlay).addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const dataUrl = await fileToResizedDataUrl(file);
+      currentImages.push(dataUrl);
+      renderImageGrid();
+    } catch (err) {
+      showToast('לא ניתן לטעון את התמונה');
+    }
+    e.target.value = '';
+  });
+
   const close = () => overlay.remove();
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   qs('.btnCloseExEdit', overlay).addEventListener('click', close);
   qs('#btnCancelExEdit', overlay).addEventListener('click', close);
   qs('#btnSaveExEdit', overlay).addEventListener('click', () => {
-    ex.name = qs('#editExName', overlay).value.trim() || ex.name;
-    ex.category = qs('#editExCategory', overlay).value.trim() || ex.category;
+    const name = qs('#editExName', overlay).value.trim();
+    if (!name) { showToast('נא להזין שם לתרגיל'); return; }
+    ex.name = name;
+    ex.category = qs('#editExCategory', overlay).value.trim() || ex.category || 'כללי';
     ex.defaultSets = Math.max(1, Number(qs('#editExSets', overlay).value) || 1);
-    ex.defaultReps = qs('#editExReps', overlay).value.trim();
+    ex.inputType = inputType === 'hold' ? 'hold' : 'reps';
+    if (ex.inputType === 'hold') {
+      ex.holdSeconds = Math.max(1, Number(qs('#editExHoldSeconds', overlay).value) || 15);
+      ex.defaultReps = `${ex.holdSeconds} שניות החזקה`;
+    } else {
+      delete ex.holdSeconds;
+      ex.defaultReps = qs('#editExReps', overlay).value.trim();
+    }
     ex.restSeconds = Math.max(10, Number(qs('#editExRest', overlay).value) || 90);
     ex.notes = qs('#editExNotes', overlay).value.trim();
+    ex.active = qs('#editExActive', overlay).checked;
+    ex.images = currentImages;
+    if (isNew) {
+      exercises.push(ex);
+    }
     db.saveExercises(exercises);
     syncExerciseNameEverywhere(ex);
     renderExercisesTab();
+    reorderActiveSessionToMatchExercises();
     close();
-    showToast('התרגיל נשמר ✅');
+    showToast(isNew ? 'התרגיל נוסף ✅' : 'התרגיל נשמר ✅');
   });
 }
 
@@ -985,10 +1233,29 @@ function reorderActiveSessionToMatchExercises() {
   const warmup = activeSession.entries.find((e) => e.exerciseId === 'warmup');
   const cooldown = activeSession.entries.find((e) => e.exerciseId === 'cooldown');
   const byExId = Object.fromEntries(activeSession.entries.map((e) => [e.exerciseId, e]));
-  const reordered = exercises.map((ex) => byExId[ex.id]).filter(Boolean);
-  // keep any orphan entries (exercise was deleted) at the end so data isn't lost
-  const orphan = activeSession.entries.filter((e) => e.exerciseId !== 'warmup' && e.exerciseId !== 'cooldown' && !exercises.some((ex) => ex.id === e.exerciseId));
-  activeSession.entries = [warmup, ...reordered, ...orphan, cooldown].filter(Boolean);
+  const hasProgress = activeSession.entries.some((e) => e.type !== 'cardio' && e.sets.some((s) => s.completed));
+
+  if (hasProgress) {
+    // mid-workout: never drop logged data — just reorder to match the exercise list,
+    // keeping any already-logged entries (even now-inactive/deleted ones) at the end.
+    const reordered = exercises.map((ex) => byExId[ex.id]).filter(Boolean);
+    const orphan = activeSession.entries.filter((e) =>
+      e.exerciseId !== 'warmup' && e.exerciseId !== 'cooldown' && !exercises.some((ex) => ex.id === e.exerciseId));
+    activeSession.entries = [warmup, ...reordered, ...orphan, cooldown].filter(Boolean);
+  } else {
+    // fresh draft: fully sync to the currently-active exercise list (add new, drop deselected)
+    const lastByExercise = getLastCompletedValuesByExercise();
+    const synced = exercises.filter((ex) => ex.active !== false).map((ex) => {
+      if (byExId[ex.id]) return byExId[ex.id];
+      const last = lastByExercise[ex.id];
+      return {
+        exerciseId: ex.id,
+        exerciseName: ex.name,
+        sets: Array.from({ length: setsForWeek(ex) }, () => ({ weightKg: last ? last.weightKg : '', reps: last ? last.reps : '', completed: false })),
+      };
+    });
+    activeSession.entries = [warmup, ...synced, cooldown].filter(Boolean);
+  }
   persistActiveSession();
   renderWorkoutTab();
 }
@@ -1065,6 +1332,7 @@ function wireSettings() {
     db.resetAll();
     location.reload();
   });
+  el('btnEnableNotifications').addEventListener('click', requestNotificationPermission);
 }
 
 function renderSettingsTab() {
@@ -1072,6 +1340,28 @@ function renderSettingsTab() {
   el('settingWeeklyGoal').value = settings.weeklyGoal;
   el('settingProgramWeek').value = settings.programWeek || 1;
   el('settingVoice').checked = settings.voiceAnnouncements !== false;
+}
+
+/* ================= PERSONAL AREA TAB ================= */
+function wireProfileTab() {
+  el('btnSaveProfile').addEventListener('click', () => {
+    profile.name = el('profileName').value.trim();
+    profile.age = el('profileAge').value;
+    profile.heightCm = el('profileHeight').value;
+    profile.weightKg = el('profileWeight').value;
+    db.saveProfile(profile);
+    renderBrand();
+    showToast('הפרטים האישיים נשמרו ✅');
+  });
+}
+function renderProfileTab() {
+  el('profileName').value = profile.name || '';
+  el('profileAge').value = profile.age || '';
+  el('profileHeight').value = profile.heightCm || '';
+  el('profileWeight').value = profile.weightKg || '';
+}
+function renderBrand() {
+  el('appBrand').textContent = profile.name ? `💪 AutoFit — ${profile.name}` : '💪 AutoFit';
 }
 
 /* ================= UTIL ================= */

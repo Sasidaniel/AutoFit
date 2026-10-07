@@ -40,7 +40,7 @@ export const SEED_EXERCISES = [
     images: ['images/p7_1.png', 'images/p7_2.png'] },
   { name: 'פטישים (Hammer Curls)', category: 'יד קדמית (ביצפס)', defaultSets: 1, defaultReps: 'עד כשל', restSeconds: 120,
     notes: 'סט אחד לכל יד עד כשל',
-    images: [] },
+    images: ['images/ex_hammer.png'] },
   { name: 'כפיפה ופשיטה של שורש כף היד (Wrist Curl)', category: 'יד קדמית (ביצפס)', defaultSets: 1, defaultReps: 'עד כשל', restSeconds: 120,
     notes: 'סט אחד לכל תנועה לכל יד עד כשל',
     images: ['images/p7_3.png'] },
@@ -53,6 +53,7 @@ export const SEED_EXERCISES = [
     images: ['images/p8_2.png', 'images/p8_3.png'] },
 
   { name: 'פלאנק', category: 'בטן / גב תחתון', defaultSets: 3, defaultReps: '15 שניות החזקה', restSeconds: 120,
+    inputType: 'hold', holdSeconds: 15,
     notes: 'החזקת גוף ישר על האמות ועל קצות האצבעות — ללא תזוזה במשך 15 שניות בכל סט',
     images: ['images/ex_plank.png'] },
   { name: 'טרפז — הרמת כתפיים עם משקולות (Shrugs)', category: 'כתפיים', defaultSets: 3, defaultReps: '12-15', restSeconds: 120,

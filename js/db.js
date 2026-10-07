@@ -4,6 +4,7 @@ const KEYS = {
   workouts: 'ft_workouts_v1',
   settings: 'ft_settings_v1',
   activeSession: 'ft_active_session_v1',
+  profile: 'ft_profile_v1',
 };
 
 export function uid() {
@@ -51,6 +52,14 @@ export function saveWorkouts(list) {
   write(KEYS.workouts, list);
 }
 
+export const DEFAULT_PROFILE = { name: '', age: '', heightCm: '', weightKg: '' };
+export function getProfile() {
+  return { ...DEFAULT_PROFILE, ...read(KEYS.profile, {}) };
+}
+export function saveProfile(profile) {
+  write(KEYS.profile, profile);
+}
+
 export function getActiveSession() {
   return read(KEYS.activeSession, null);
 }
@@ -67,6 +76,7 @@ export function exportAll() {
     exercises: getExercises(),
     workouts: getWorkouts(),
     settings: getSettings(),
+    profile: getProfile(),
   };
 }
 
@@ -74,6 +84,7 @@ export function importAll(data) {
   if (data.exercises) saveExercises(data.exercises);
   if (data.workouts) saveWorkouts(data.workouts);
   if (data.settings) saveSettings(data.settings);
+  if (data.profile) saveProfile(data.profile);
 }
 
 export function resetAll() {
