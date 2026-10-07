@@ -165,6 +165,7 @@ function init() {
   wireSettings();
   wireExercisesTab();
   wireProfileTab();
+  wireHistoryTab();
   renderBrand();
   startLiveClock();
   setInterval(tickCardioTimers, 1000);
@@ -720,8 +721,13 @@ function startRestTimer(ex, exerciseDone) {
 }
 
 /* ================= HISTORY TAB ================= */
+const selectedWorkoutIds = new Set();
+
 function renderHistoryTab() {
   workouts = db.getWorkouts();
+  const validIds = new Set(workouts.map((w) => w.id));
+  [...selectedWorkoutIds].forEach((id) => { if (!validIds.has(id)) selectedWorkoutIds.delete(id); });
+  updateHistorySelectBar();
   const list = el('historyList');
   list.innerHTML = '';
   if (!workouts.length) {
@@ -734,10 +740,11 @@ function renderHistoryTab() {
     const totalSets = strengthEntries.reduce((a, e) => a + e.sets.length, 0);
     const totalExercises = strengthEntries.length;
     const item = document.createElement('div');
-    item.className = 'history-item';
+    item.className = 'history-item' + (selectedWorkoutIds.has(w.id) ? ' selected' : '');
     item.innerHTML = `
       <div class="history-item-top">
-        <div>
+        <input type="checkbox" class="history-select-check" ${selectedWorkoutIds.has(w.id) ? 'checked' : ''}>
+        <div style="flex:1;">
           <div class="history-date">${formatDate(w.dateISO)}</div>
           <div class="history-sub">
             <span>⏱ ${formatHMS(w.durationSec)}</span>
@@ -769,8 +776,14 @@ function renderHistoryTab() {
       </div>
     `;
     item.addEventListener('click', (ev) => {
-      if (ev.target.closest('.btnDeleteWorkout') || ev.target.closest('.btnEditWorkout')) return;
+      if (ev.target.closest('.btnDeleteWorkout') || ev.target.closest('.btnEditWorkout') || ev.target.closest('.btnShareWorkout') || ev.target.closest('.history-select-check')) return;
       item.classList.toggle('open');
+    });
+    qs('.history-select-check', item).addEventListener('change', (ev) => {
+      if (ev.target.checked) selectedWorkoutIds.add(w.id);
+      else selectedWorkoutIds.delete(w.id);
+      item.classList.toggle('selected', ev.target.checked);
+      updateHistorySelectBar();
     });
     qs('.btnEditWorkout', item).addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -778,7 +791,7 @@ function renderHistoryTab() {
     });
     qs('.btnShareWorkout', item).addEventListener('click', (ev) => {
       ev.stopPropagation();
-      openShareModal(w);
+      openShareModal([w]);
     });
     qs('.btnDeleteWorkout', item).addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -852,47 +865,64 @@ function openEditWorkoutModal(workout) {
   });
 }
 
-/* ---------------- share workout (email / WhatsApp / PDF) ---------------- */
-function buildWorkoutShareText(w) {
-  const lines = [];
+/* ---------------- share workout(s) (email / WhatsApp / PDF) ---------------- */
+function buildWorkoutShareText(workoutsArr) {
   const who = profile && profile.name ? ` — ${profile.name}` : '';
-  lines.push(`💪 אימון AutoFit${who}`);
-  lines.push(`📅 ${formatDate(w.dateISO)}`);
-  lines.push(`⏱ משך האימון: ${formatHMS(w.durationSec)}`);
-  lines.push(`📦 נפח כולל: ${Math.round(computeVolume(w)).toLocaleString()} ק"ג`);
-  lines.push('');
-  w.entries.forEach((e) => {
-    if (e.type === 'cardio') {
-      if (e.completed) lines.push(`${e.exerciseId === 'warmup' ? '🔥 חימום' : '🧘 שחרור'}: ${Math.round(e.durationSec / 60)} דקות`);
-      return;
-    }
-    if (!e.sets.length) return;
-    lines.push(`🏋️ ${e.exerciseName}`);
-    e.sets.forEach((s, i) => lines.push(`   סט ${i + 1}: ${s.weightKg} ק"ג × ${s.reps}`));
+  const lines = [];
+  if (workoutsArr.length > 1) {
+    const totalVolume = workoutsArr.reduce((a, w) => a + computeVolume(w), 0);
+    lines.push(`💪 ${workoutsArr.length} אימוני AutoFit${who}`);
+    lines.push(`📦 נפח מצטבר: ${Math.round(totalVolume).toLocaleString()} ק"ג`);
+    lines.push('');
+  }
+  workoutsArr.forEach((w, wi) => {
+    if (workoutsArr.length > 1) lines.push(`━━━ אימון ${wi + 1} ━━━`);
+    else lines.push(`💪 אימון AutoFit${who}`);
+    lines.push(`📅 ${formatDate(w.dateISO)}`);
+    lines.push(`⏱ משך האימון: ${formatHMS(w.durationSec)}`);
+    lines.push(`📦 נפח: ${Math.round(computeVolume(w)).toLocaleString()} ק"ג`);
+    lines.push('');
+    w.entries.forEach((e) => {
+      if (e.type === 'cardio') {
+        if (e.completed) lines.push(`${e.exerciseId === 'warmup' ? '🔥 חימום' : '🧘 שחרור'}: ${Math.round(e.durationSec / 60)} דקות`);
+        return;
+      }
+      if (!e.sets.length) return;
+      lines.push(`🏋️ ${e.exerciseName}`);
+      e.sets.forEach((s, i) => lines.push(`   סט ${i + 1}: ${s.weightKg} ק"ג × ${s.reps}`));
+    });
+    lines.push('');
   });
-  lines.push('');
   lines.push('נשלח מתוך AutoFit 🚀');
   return lines.join('\n');
 }
 
-function openWorkoutPrintView(w) {
+function openWorkoutPrintView(workoutsArr) {
   const who = profile && profile.name ? escapeHtml(profile.name) : '';
   const win = window.open('', '_blank');
   if (!win) { showToast('הדפדפן חסם פתיחת חלון — אפשר לנסות שוב'); return; }
-  const rows = w.entries.map((e) => {
-    if (e.type === 'cardio') {
-      return e.completed
-        ? `<div class="pw-ex"><b>${e.exerciseId === 'warmup' ? '🔥 חימום' : '🧘 שחרור'}</b> — ${Math.round(e.durationSec / 60)} דקות</div>`
-        : '';
-    }
-    if (!e.sets.length) return '';
-    return `<div class="pw-ex"><b>${escapeHtml(e.exerciseName)}</b>
-      <table><thead><tr><th>סט</th><th>ק"ג</th><th>חזרות</th></tr></thead>
-      <tbody>${e.sets.map((s, i) => `<tr><td>${i + 1}</td><td>${s.weightKg}</td><td>${s.reps}</td></tr>`).join('')}</tbody>
-      </table></div>`;
-  }).join('');
+  const sections = workoutsArr.map((w) => {
+    const rows = w.entries.map((e) => {
+      if (e.type === 'cardio') {
+        return e.completed
+          ? `<div class="pw-ex"><b>${e.exerciseId === 'warmup' ? '🔥 חימום' : '🧘 שחרור'}</b> — ${Math.round(e.durationSec / 60)} דקות</div>`
+          : '';
+      }
+      if (!e.sets.length) return '';
+      return `<div class="pw-ex"><b>${escapeHtml(e.exerciseName)}</b>
+        <table><thead><tr><th>סט</th><th>ק"ג</th><th>חזרות</th></tr></thead>
+        <tbody>${e.sets.map((s, i) => `<tr><td>${i + 1}</td><td>${s.weightKg}</td><td>${s.reps}</td></tr>`).join('')}</tbody>
+        </table></div>`;
+    }).join('');
+    return `<section class="pw-section">
+      <div class="pw-sub">${formatDate(w.dateISO)} &middot; משך: ${formatHMS(w.durationSec)}</div>
+      <div class="pw-stats"><span>📦 נפח: ${Math.round(computeVolume(w)).toLocaleString()} ק"ג</span></div>
+      ${rows}
+    </section>`;
+  }).join('<div class="pw-divider"></div>');
+  const title = workoutsArr.length > 1 ? `${workoutsArr.length} אימוני AutoFit` : `אימון AutoFit — ${formatDate(workoutsArr[0].dateISO)}`;
   win.document.write(`<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="UTF-8">
-    <title>אימון AutoFit — ${formatDate(w.dateISO)}</title>
+    <title>${title}</title>
     <style>
       body{font-family:Arial, Helvetica, sans-serif; padding:24px; color:#111;}
       h1{text-align:center; margin-bottom:4px;}
@@ -900,29 +930,29 @@ function openWorkoutPrintView(w) {
       .pw-stats{display:flex; justify-content:center; gap:18px; margin-bottom:24px; flex-wrap:wrap;}
       .pw-stats span{background:#f1f1f1; padding:6px 12px; border-radius:8px;}
       .pw-ex{margin-bottom:14px; page-break-inside:avoid;}
+      .pw-section{margin-bottom:10px;}
+      .pw-divider{border-top:2px dashed #ccc; margin:24px 0; page-break-after:always;}
       table{width:100%; border-collapse:collapse; margin-top:4px;}
       th,td{border:1px solid #ccc; padding:4px 8px; text-align:center;}
       .pw-footer{text-align:center; margin-top:30px; color:#888; font-size:12px;}
     </style></head><body>
     <h1>💪 AutoFit${who ? ' — ' + who : ''}</h1>
-    <div class="pw-sub">${formatDate(w.dateISO)} &middot; משך: ${formatHMS(w.durationSec)}</div>
-    <div class="pw-stats">
-      <span>📦 נפח: ${Math.round(computeVolume(w)).toLocaleString()} ק"ג</span>
-    </div>
-    ${rows}
+    ${sections}
     <div class="pw-footer">נוצר באפליקציית AutoFit</div>
     <script>window.onload = () => setTimeout(() => window.print(), 300);</script>
     </body></html>`);
   win.document.close();
 }
 
-function openShareModal(w) {
-  const text = buildWorkoutShareText(w);
+function openShareModal(workoutsArr) {
+  const list = Array.isArray(workoutsArr) ? workoutsArr : [workoutsArr];
+  const text = buildWorkoutShareText(list);
+  const title = list.length > 1 ? `שיתוף ${list.length} אימונים` : `שיתוף אימון — ${formatDate(list[0].dateISO)}`;
   const overlay = document.createElement('div');
   overlay.className = 'photo-overlay';
   overlay.innerHTML = `
     <div class="photo-modal">
-      <div class="photo-modal-head"><b>שיתוף אימון — ${formatDate(w.dateISO)}</b><button class="btn-icon btnCloseShare">✕</button></div>
+      <div class="photo-modal-head"><b>${title}</b><button class="btn-icon btnCloseShare">✕</button></div>
       <div class="settings-actions" style="flex-direction:column;">
         ${navigator.share ? '<button class="btn btn-primary" id="shareNative">📲 שתף (מייל / וואטסאפ / ועוד)</button>' : ''}
         <button class="btn btn-secondary" id="shareMail">📧 שליחה במייל</button>
@@ -941,7 +971,7 @@ function openShareModal(w) {
     });
   }
   qs('#shareMail', overlay).addEventListener('click', () => {
-    const subject = encodeURIComponent(`אימון AutoFit — ${formatDate(w.dateISO)}`);
+    const subject = encodeURIComponent(title);
     window.location.href = `mailto:?subject=${subject}&body=${encodeURIComponent(text)}`;
     close();
   });
@@ -950,8 +980,28 @@ function openShareModal(w) {
     close();
   });
   qs('#sharePdf', overlay).addEventListener('click', () => {
-    openWorkoutPrintView(w);
+    openWorkoutPrintView(list);
     close();
+  });
+}
+
+function updateHistorySelectBar() {
+  const bar = el('historySelectBar');
+  const n = selectedWorkoutIds.size;
+  bar.classList.toggle('hidden', n === 0);
+  el('historySelectCount').textContent = `${n} נבחרו`;
+}
+
+function wireHistoryTab() {
+  el('btnShareSelected').addEventListener('click', () => {
+    const selected = workouts.filter((w) => selectedWorkoutIds.has(w.id))
+      .sort((a, b) => new Date(a.dateISO) - new Date(b.dateISO));
+    if (!selected.length) return;
+    openShareModal(selected);
+  });
+  el('btnClearSelection').addEventListener('click', () => {
+    selectedWorkoutIds.clear();
+    renderHistoryTab();
   });
 }
 
@@ -1515,9 +1565,17 @@ function escapeHtml(str) {
 function escapeAttr(str) { return escapeHtml(str); }
 
 function registerServiceWorker() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./service-worker.js').catch(() => {});
-  }
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+  // When a newly-deployed service worker takes control, reload once so the
+  // freshest HTML/JS/CSS shows up immediately instead of waiting for the user
+  // to manually force-quit/reopen the installed app.
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded) return;
+    reloaded = true;
+    window.location.reload();
+  });
 }
 
 document.addEventListener('DOMContentLoaded', init);

@@ -1,5 +1,5 @@
-// service-worker.js — app shell caching for offline + installability
-const CACHE_NAME = 'fitness-tracker-v10';
+﻿// service-worker.js â€” app shell caching for offline + installability
+const CACHE_NAME = 'fitness-tracker-v11';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -41,6 +41,29 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  const isAppShell = event.request.mode === 'navigate' ||
+    (url.origin === self.location.origin && /\.(html|js|css|json)$/.test(url.pathname));
+
+  if (isAppShell) {
+    // Network-first for the app shell (HTML/JS/CSS) so code/UI updates are picked
+    // up on the very next load instead of only after a background refresh.
+    event.respondWith(
+      fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+          return networkResponse;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Stale-while-revalidate for images/fonts/CDN assets: instant load from cache,
+  // refreshed in the background for next time (good for offline + large images).
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const fetchPromise = fetch(event.request)
@@ -56,3 +79,4 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+

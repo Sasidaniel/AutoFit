@@ -61,7 +61,7 @@ body { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
 .workout-timer-row { display: flex; align-items: center; justify-content: space-between; }
 .label { font-size: 12px; color: var(--text-muted); margin-bottom: 2px; }
 .big-timer { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--primary); }
-.workout-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+.workout-controls { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
 
 .progress-summary { margin-top: 12px; }
 .progress-bar { background: var(--surface-alt); border-radius: 8px; height: 10px; margin-top: 6px; overflow: hidden; }
@@ -139,7 +139,10 @@ body { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
 
 /* History */
 .history-item { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; cursor: pointer; box-shadow: var(--shadow); }
-.history-item-top { display: flex; justify-content: space-between; align-items: center; }
+.history-item.selected { border-color: #3b82f6; box-shadow: 0 0 0 2px #3b82f6 inset; }
+.history-item-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.history-select-check { width: 20px; height: 20px; flex: none; accent-color: #3b82f6; }
+.history-select-bar { position: sticky; top: 0; z-index: 5; display: flex; justify-content: space-between; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; margin-bottom: 10px; box-shadow: var(--shadow); }
 .history-date { font-weight: 700; color: var(--text); }
 .history-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; display: flex; gap: 12px; flex-wrap: wrap; }
 .history-detail { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; display: none; }
