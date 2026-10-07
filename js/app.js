@@ -95,6 +95,8 @@ function init() {
   if (!exercises.length) {
     exercises = SEED_EXERCISES.map((e) => ({ id: db.uid(), active: true, ...e }));
     db.saveExercises(exercises);
+    settings.seedSynced = true;
+    db.saveSettings(settings);
   } else {
     // migrate older saved exercises that are missing newer fields (images, hold-type, active flag)
     let migrated = false;
@@ -119,12 +121,19 @@ function init() {
       }
     });
     if (migrated) db.saveExercises(exercises);
-    // add any newly introduced seed exercises (by name) that aren't in the user's saved list yet
-    const missing = SEED_EXERCISES.filter((s) => !exercises.some((ex) => ex.name === s.name));
-    if (missing.length) {
-      exercises = [...exercises, ...missing.map((e) => ({ id: db.uid(), active: true, ...e }))];
-      db.saveExercises(exercises);
+    // One-time seed sync (adds any seed exercises introduced after this user's install
+    // that they don't already have, matched by name). Runs only once ever — after that,
+    // exercises the user renames or deletes stay renamed/deleted permanently, even if
+    // the name no longer matches a seed exercise.
+    if (!settings.seedSynced) {
+      const missing = SEED_EXERCISES.filter((s) => !exercises.some((ex) => ex.name === s.name));
+      if (missing.length) {
+        exercises = [...exercises, ...missing.map((e) => ({ id: db.uid(), active: true, ...e }))];
+        db.saveExercises(exercises);
+      }
     }
+    settings.seedSynced = true;
+    db.saveSettings(settings);
   }
   if (settings.restSeconds !== 120) {
     settings.restSeconds = 120;

@@ -33,6 +33,7 @@ export const DEFAULT_SETTINGS = {
   warmupMinutes: 5,
   cooldownName: 'שחרור — הליכה',
   cooldownMinutes: 5,
+  seedSynced: false,
 };
 
 export function getSettings() {
