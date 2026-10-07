@@ -9,33 +9,34 @@ export function formatHMS(totalSeconds) {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+// Epoch-based stopwatch: elapsed is always derived from (now - startEpochMs),
+// so it stays correct even if the screen locks, the tab is backgrounded, or
+// setInterval gets throttled — there is nothing to "catch up" on resume.
 export class Stopwatch {
   constructor(onTick) {
     this.onTick = onTick;
-    this.startedAt = null;
-    this.accumulated = 0; // seconds already elapsed before current run
+    this.startEpochMs = null;
     this.intervalId = null;
   }
-  start(resumeFromSeconds = 0) {
-    this.accumulated = resumeFromSeconds;
-    this.startedAt = Date.now();
+  start(startEpochMs) {
+    this.startEpochMs = startEpochMs;
     this._tick();
     this.intervalId = setInterval(() => this._tick(), 1000);
   }
   _tick() {
-    const elapsed = this.accumulated + (Date.now() - this.startedAt) / 1000;
-    this.onTick(elapsed);
+    if (!this.startEpochMs) return;
+    this.onTick((Date.now() - this.startEpochMs) / 1000);
   }
+  forceTick() { this._tick(); }
   getElapsed() {
-    if (!this.startedAt) return this.accumulated;
-    return this.accumulated + (Date.now() - this.startedAt) / 1000;
+    if (!this.startEpochMs) return 0;
+    return (Date.now() - this.startEpochMs) / 1000;
   }
   stop() {
     if (this.intervalId) clearInterval(this.intervalId);
     this.intervalId = null;
     const total = this.getElapsed();
-    this.startedAt = null;
-    this.accumulated = total;
+    this.startEpochMs = null;
     return total;
   }
 }
@@ -60,6 +61,30 @@ export function playBeep() {
   if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
 }
 
+// Voice announcement via Web Speech API (plays through connected headphones too).
+// Must first be triggered from a user gesture (tap) on iOS, otherwise it's silently blocked.
+export function speak(text, lang = 'he-IL') {
+  try {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang;
+    u.rate = 1;
+    u.volume = 1;
+    window.speechSynthesis.speak(u);
+  } catch (e) { /* speech not available */ }
+}
+
+// Call once on a user gesture (e.g. the "start workout" tap) to unlock speech on iOS.
+export function primeSpeech() {
+  try {
+    if (!('speechSynthesis' in window)) return;
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0;
+    window.speechSynthesis.speak(u);
+  } catch (e) { /* noop */ }
+}
+
 export class RestTimer {
   constructor({ onTick, onDone }) {
     this.onTick = onTick;
@@ -78,6 +103,7 @@ export class RestTimer {
     this.endAt += seconds * 1000;
     this._tick();
   }
+  forceTick() { this._tick(); }
   _tick() {
     const remaining = (this.endAt - Date.now()) / 1000;
     if (remaining <= 0) {

@@ -27,6 +27,7 @@ export const DEFAULT_SETTINGS = {
   restSeconds: 90,
   weeklyGoal: 3,
   programWeek: 1, // week 1 = 1 set/exercise, week 2 = 2 sets, week 3+ = full (defaultSets)
+  voiceAnnouncements: true,
 };
 
 export function getSettings() {

@@ -1,9 +1,11 @@
 // app.js — main application controller
 import * as db from './db.js';
 import { SEED_EXERCISES } from './seed.js';
-import { Stopwatch, RestTimer, formatHMS, playBeep } from './timer.js';
+import { Stopwatch, RestTimer, formatHMS, playBeep, speak, primeSpeech } from './timer.js';
 
 const KG_TO_LBS = 2.20462;
+function round1(n) { return Math.round(n * 10) / 10; }
+function round2(n) { return Math.round(n * 100) / 100; }
 
 /* ---------------- state ---------------- */
 let exercises = [];
@@ -20,9 +22,34 @@ const restTimer = new RestTimer({
   },
   onDone: () => {
     playBeep();
+    if (settings.voiceAnnouncements) speak('זמן המנוחה הסתיים. אפשר לבצע עוד סט');
     el('restOverlay').classList.add('hidden');
     showToast('המנוחה הסתיימה — אפשר לעשות עוד סט! 💪');
   },
+});
+
+let wakeLockRef = null;
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLockRef = await navigator.wakeLock.request('screen');
+    }
+  } catch (e) { /* wake lock not available / denied — timer still stays accurate */ }
+}
+function releaseWakeLock() {
+  if (wakeLockRef) {
+    wakeLockRef.release().catch(() => {});
+    wakeLockRef = null;
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    if (activeSession && activeSession.running) {
+      stopwatch.forceTick();
+      requestWakeLock();
+    }
+    if (restTimer.isRunning()) restTimer.forceTick();
+  }
 });
 
 function el(id) { return document.getElementById(id); }
@@ -63,7 +90,8 @@ function init() {
   renderSettingsTab();
 
   if (activeSession.running) {
-    stopwatch.start(activeSession.accumulatedSec || 0);
+    stopwatch.start(new Date(activeSession.startedAt).getTime());
+    requestWakeLock();
     el('btnStartWorkout').classList.add('hidden');
     el('btnFinishWorkout').classList.remove('hidden');
   }
@@ -171,10 +199,12 @@ function getLastCompletedValuesByExercise() {
 
 function wireWorkoutControls() {
   el('btnStartWorkout').addEventListener('click', () => {
+    primeSpeech();
     activeSession.running = true;
     activeSession.startedAt = activeSession.startedAt || new Date().toISOString();
     persistActiveSession();
-    stopwatch.start(activeSession.accumulatedSec || 0);
+    stopwatch.start(new Date(activeSession.startedAt).getTime());
+    requestWakeLock();
     el('btnStartWorkout').classList.add('hidden');
     el('btnFinishWorkout').classList.remove('hidden');
   });
@@ -193,6 +223,7 @@ function wireWorkoutControls() {
 
 function finishWorkout() {
   const durationSec = stopwatch.stop();
+  releaseWakeLock();
   activeSession.running = false;
   activeSession.accumulatedSec = durationSec;
 
@@ -237,7 +268,7 @@ function renderWorkoutTab() {
 
   let totalSets = 0, completedSets = 0;
 
-  activeSession.entries.forEach((entry) => {
+  activeSession.entries.forEach((entry, entryIdx) => {
     const ex = exercises.find((e) => e.id === entry.exerciseId);
     if (!ex) return;
     totalSets += entry.sets.length;
@@ -249,9 +280,12 @@ function renderWorkoutTab() {
     const head = document.createElement('div');
     head.className = 'exercise-card-head';
     head.innerHTML = `
-      <div>
-        <div class="exercise-name">${escapeHtml(ex.name)}</div>
-        <div class="exercise-meta">${escapeHtml(ex.defaultReps)} חזרות &middot; ${escapeHtml(ex.notes || '')}</div>
+      <div style="display:flex;gap:8px;align-items:flex-start;">
+        <span class="exercise-num">${entryIdx + 1}</span>
+        <div>
+          <div class="exercise-name">${escapeHtml(ex.name)}</div>
+          <div class="exercise-meta">${escapeHtml(ex.defaultReps)} חזרות &middot; ${escapeHtml(ex.notes || '')}</div>
+        </div>
       </div>
       <div class="exercise-head-right">
         <span class="exercise-category-tag">${escapeHtml(ex.category)}</span>
@@ -266,32 +300,36 @@ function renderWorkoutTab() {
     const table = document.createElement('table');
     table.className = 'sets-table';
     table.innerHTML = `<thead><tr>
-        <th></th><th>סט</th><th>ק"ג</th><th>חזרות</th><th>✓</th>
+        <th></th><th>סט</th><th>ק"ג</th><th>lbs</th><th>חזרות</th><th>✓</th>
       </tr></thead>`;
     const tbody = document.createElement('tbody');
 
     entry.sets.forEach((set, idx) => {
       const tr = document.createElement('tr');
       tr.className = 'set-row' + (set.completed ? ' completed' : '');
-      const lbs = set.weightKg ? (Number(set.weightKg) * KG_TO_LBS).toFixed(1) : '';
+      const lbsVal = set.weightKg ? round1(Number(set.weightKg) * KG_TO_LBS) : '';
       tr.innerHTML = `
         <td class="set-num">—</td>
         <td class="set-num">${idx + 1}</td>
-        <td>
-          <input type="number" inputmode="decimal" class="set-input weight" value="${set.weightKg}" placeholder="0">
-          <span class="lbs-hint">${lbs ? lbs + ' lbs' : ''}</span>
-        </td>
+        <td><input type="number" inputmode="decimal" class="set-input weight" value="${set.weightKg}" placeholder="0"></td>
+        <td><input type="number" inputmode="decimal" class="set-input lbs" value="${lbsVal}" placeholder="0"></td>
         <td><input type="number" inputmode="numeric" class="set-input reps" value="${set.reps}" placeholder="0"></td>
         <td><button class="set-check ${set.completed ? 'checked' : ''}" aria-label="סט הושלם"></button></td>
       `;
       const weightInput = qs('.weight', tr);
+      const lbsInput = qs('.lbs', tr);
       const repsInput = qs('.reps', tr);
       const checkBtn = qs('.set-check', tr);
-      const lbsHint = qs('.lbs-hint', tr);
 
       weightInput.addEventListener('input', () => {
         set.weightKg = weightInput.value;
-        lbsHint.textContent = weightInput.value ? (Number(weightInput.value) * KG_TO_LBS).toFixed(1) + ' lbs' : '';
+        lbsInput.value = weightInput.value ? round1(Number(weightInput.value) * KG_TO_LBS) : '';
+        persistActiveSession();
+      });
+      lbsInput.addEventListener('input', () => {
+        const kgVal = lbsInput.value ? round2(Number(lbsInput.value) / KG_TO_LBS) : '';
+        set.weightKg = kgVal;
+        weightInput.value = kgVal;
         persistActiveSession();
       });
       repsInput.addEventListener('input', () => {
@@ -314,7 +352,10 @@ function renderWorkoutTab() {
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
-    card.appendChild(table);
+    const tableWrap = document.createElement('div');
+    tableWrap.className = 'set-table-wrap';
+    tableWrap.appendChild(table);
+    card.appendChild(tableWrap);
 
     const actions = document.createElement('div');
     actions.className = 'set-row-actions';
@@ -346,8 +387,9 @@ function updateProgress(total, done) {
     total = activeSession.entries.reduce((a, e) => a + e.sets.length, 0);
     done = activeSession.entries.reduce((a, e) => a + e.sets.filter((s) => s.completed).length, 0);
   }
-  el('setsProgressText').textContent = `${done} / ${total} סטים הושלמו`;
-  el('setsProgressFill').style.width = total ? `${(done / total) * 100}%` : '0%';
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  el('setsProgressText').textContent = `${done} / ${total} סטים הושלמו (${pct}%)`;
+  el('setsProgressFill').style.width = `${pct}%`;
 }
 
 function startRestTimer(ex) {
@@ -381,20 +423,29 @@ function renderHistoryTab() {
             <span>📦 ${Math.round(volume)} ק"ג נפח</span>
           </div>
         </div>
-        <button class="btn-icon btnDeleteWorkout">🗑️</button>
+        <div style="display:flex;gap:2px;">
+          <button class="btn-icon btnEditWorkout">✏️</button>
+          <button class="btn-icon btnDeleteWorkout">🗑️</button>
+        </div>
       </div>
       <div class="history-detail">
         ${w.entries.map((e) => `
           <div class="history-exercise-line">
-            <b>${escapeHtml(e.exerciseName)}</b><br>
-            <span class="history-sets-line">${e.sets.map((s) => `${s.weightKg}ק"ג×${s.reps}`).join('  ·  ')}</span>
+            <b>${escapeHtml(e.exerciseName)}</b>
+            <div class="history-sets-line">
+              ${e.sets.map((s, i) => `<div>סט ${i + 1}: ${s.weightKg} ק"ג × ${s.reps} חזרות</div>`).join('')}
+            </div>
           </div>
         `).join('')}
       </div>
     `;
     item.addEventListener('click', (ev) => {
-      if (ev.target.closest('.btnDeleteWorkout')) return;
+      if (ev.target.closest('.btnDeleteWorkout') || ev.target.closest('.btnEditWorkout')) return;
       item.classList.toggle('open');
+    });
+    qs('.btnEditWorkout', item).addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      openEditWorkoutModal(w);
     });
     qs('.btnDeleteWorkout', item).addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -405,6 +456,62 @@ function renderHistoryTab() {
       renderDashboard();
     });
     list.appendChild(item);
+  });
+}
+
+function openEditWorkoutModal(workout) {
+  const clone = JSON.parse(JSON.stringify(workout));
+  const overlay = document.createElement('div');
+  overlay.className = 'photo-overlay';
+  overlay.innerHTML = `
+    <div class="photo-modal">
+      <div class="photo-modal-head"><b>עריכת אימון — ${formatDate(clone.dateISO)}</b><button class="btn-icon btnCloseEditW">✕</button></div>
+      <div class="edit-workout-body">
+        ${clone.entries.map((e, ei) => `
+          <div class="edit-exercise-block" data-ei="${ei}">
+            <div class="edit-exercise-title">${escapeHtml(e.exerciseName)}</div>
+            ${e.sets.map((s, si) => `
+              <div class="edit-set-row" data-si="${si}">
+                <span class="set-num">סט ${si + 1}</span>
+                <input type="number" inputmode="decimal" class="input edit-weight" value="${s.weightKg}" placeholder="ק&quot;ג">
+                <input type="number" inputmode="numeric" class="input edit-reps" value="${s.reps}" placeholder="חזרות">
+                <button class="btn-icon btnDeleteEditSet">🗑️</button>
+              </div>
+            `).join('')}
+          </div>
+        `).join('')}
+      </div>
+      <div class="settings-actions">
+        <button class="btn btn-primary btnSaveEditW">שמור שינויים</button>
+        <button class="btn btn-secondary btnCancelEditW">ביטול</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  qs('.btnCloseEditW', overlay).addEventListener('click', close);
+  qs('.btnCancelEditW', overlay).addEventListener('click', close);
+  qsa('.btnDeleteEditSet', overlay).forEach((btn) => {
+    btn.addEventListener('click', () => btn.closest('.edit-set-row').remove());
+  });
+  qs('.btnSaveEditW', overlay).addEventListener('click', () => {
+    qsa('.edit-exercise-block', overlay).forEach((block) => {
+      const ei = Number(block.dataset.ei);
+      const rows = qsa('.edit-set-row', block);
+      clone.entries[ei].sets = rows.map((row) => ({
+        weightKg: Number(qs('.edit-weight', row).value) || 0,
+        reps: Number(qs('.edit-reps', row).value) || 0,
+        completed: true,
+      }));
+    });
+    clone.entries = clone.entries.filter((e) => e.sets.length > 0);
+    workouts = db.getWorkouts().map((w) => (w.id === clone.id ? clone : w));
+    db.saveWorkouts(workouts);
+    close();
+    renderHistoryTab();
+    renderDashboard();
+    showToast('האימון עודכן ✅');
   });
 }
 
@@ -580,33 +687,19 @@ function renderExercisesTab() {
       <div class="exercise-manage-head">
         <div style="display:flex;align-items:center;gap:8px;">
           <span class="drag-handle" title="גרור לשינוי סדר">⠿</span>
-          <b>${escapeHtml(ex.name)}</b>
+          <div>
+            <b>${escapeHtml(ex.name)}</b>
+            <div class="exercise-meta">${escapeHtml(ex.category)} &middot; ${ex.defaultSets} סטים × ${escapeHtml(ex.defaultReps)}</div>
+          </div>
         </div>
         <div style="display:flex;align-items:center;gap:4px;">
           ${ex.images && ex.images.length ? '<button class="btn-icon btnShowPhotoManage">📷</button>' : ''}
+          <button class="btn-icon btnEditEx">✏️</button>
           <button class="btn-icon btnDeleteEx">🗑️</button>
         </div>
       </div>
-      <div class="exercise-manage-fields">
-        <div class="full"><label class="field-label">שם התרגיל</label><input class="input fName" value="${escapeAttr(ex.name)}"></div>
-        <div><label class="field-label">קבוצת שריר</label><input class="input fCategory" value="${escapeAttr(ex.category)}"></div>
-        <div><label class="field-label">סטים ברירת מחדל</label><input type="number" min="1" class="input fSets" value="${ex.defaultSets}"></div>
-        <div><label class="field-label">חזרות</label><input class="input fReps" value="${escapeAttr(ex.defaultReps)}"></div>
-        <div><label class="field-label">מנוחה (שניות)</label><input type="number" min="10" class="input fRest" value="${ex.restSeconds}"></div>
-        <div class="full"><label class="field-label">הערות</label><input class="input fNotes" value="${escapeAttr(ex.notes || '')}"></div>
-      </div>
     `;
-    const save = () => {
-      ex.name = qs('.fName', item).value || ex.name;
-      ex.category = qs('.fCategory', item).value;
-      ex.defaultSets = Math.max(1, Number(qs('.fSets', item).value) || 1);
-      ex.defaultReps = qs('.fReps', item).value;
-      ex.restSeconds = Math.max(10, Number(qs('.fRest', item).value) || 90);
-      ex.notes = qs('.fNotes', item).value;
-      db.saveExercises(exercises);
-      qs('b', item).textContent = ex.name;
-    };
-    qsa('input', item).forEach((input) => input.addEventListener('change', save));
+    qs('.btnEditEx', item).addEventListener('click', () => openExerciseEditModal(ex));
     qs('.btnDeleteEx', item).addEventListener('click', () => {
       if (!confirm(`למחוק את "${ex.name}"? אימוני עבר יישמרו.`)) return;
       exercises = exercises.filter((e) => e.id !== ex.id);
@@ -623,6 +716,65 @@ function renderExercisesTab() {
     db.saveExercises(exercises);
     reorderActiveSessionToMatchExercises();
   });
+}
+
+function openExerciseEditModal(ex) {
+  const overlay = document.createElement('div');
+  overlay.className = 'photo-overlay';
+  overlay.innerHTML = `
+    <div class="photo-modal">
+      <div class="photo-modal-head"><b>עריכת תרגיל</b><button class="btn-icon btnCloseExEdit">✕</button></div>
+      <label class="field-label">שם התרגיל</label>
+      <input class="input" id="editExName" value="${escapeAttr(ex.name)}">
+      <label class="field-label">קבוצת שריר</label>
+      <input class="input" id="editExCategory" value="${escapeAttr(ex.category)}">
+      <label class="field-label">סטים ברירת מחדל</label>
+      <input type="number" min="1" class="input" id="editExSets" value="${ex.defaultSets}">
+      <label class="field-label">חזרות</label>
+      <input class="input" id="editExReps" value="${escapeAttr(ex.defaultReps)}">
+      <label class="field-label">מנוחה (שניות)</label>
+      <input type="number" min="10" class="input" id="editExRest" value="${ex.restSeconds}">
+      <label class="field-label">הערות</label>
+      <input class="input" id="editExNotes" value="${escapeAttr(ex.notes || '')}">
+      <div class="settings-actions">
+        <button class="btn btn-primary" id="btnSaveExEdit">שמור</button>
+        <button class="btn btn-secondary" id="btnCancelExEdit">ביטול</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  qs('#btnCloseExEdit', overlay).addEventListener('click', close);
+  qs('#btnCancelExEdit', overlay).addEventListener('click', close);
+  qs('#btnSaveExEdit', overlay).addEventListener('click', () => {
+    ex.name = qs('#editExName', overlay).value.trim() || ex.name;
+    ex.category = qs('#editExCategory', overlay).value.trim() || ex.category;
+    ex.defaultSets = Math.max(1, Number(qs('#editExSets', overlay).value) || 1);
+    ex.defaultReps = qs('#editExReps', overlay).value.trim();
+    ex.restSeconds = Math.max(10, Number(qs('#editExRest', overlay).value) || 90);
+    ex.notes = qs('#editExNotes', overlay).value.trim();
+    db.saveExercises(exercises);
+    syncExerciseNameEverywhere(ex);
+    renderExercisesTab();
+    close();
+    showToast('התרגיל נשמר ✅');
+  });
+}
+
+function syncExerciseNameEverywhere(ex) {
+  if (!activeSession) return;
+  let changed = false;
+  activeSession.entries.forEach((e) => {
+    if (e.exerciseId === ex.id && e.exerciseName !== ex.name) {
+      e.exerciseName = ex.name;
+      changed = true;
+    }
+  });
+  if (changed) {
+    persistActiveSession();
+    renderWorkoutTab();
+  }
 }
 
 /* ---- drag-to-reorder (pointer events, touch-friendly for iPhone) ---- */
@@ -706,6 +858,11 @@ function wireSettings() {
     applyProgramWeekToActiveSession();
     showToast(`שבוע תוכנית עודכן ל-${settings.programWeek}`);
   });
+  el('settingVoice').addEventListener('change', (e) => {
+    settings.voiceAnnouncements = e.target.checked;
+    db.saveSettings(settings);
+    if (settings.voiceAnnouncements) { primeSpeech(); speak('ההודעות הקוליות הופעלו'); }
+  });
   el('btnExportData').addEventListener('click', () => {
     const data = db.exportAll();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -744,6 +901,7 @@ function renderSettingsTab() {
   el('settingRestSeconds').value = settings.restSeconds;
   el('settingWeeklyGoal').value = settings.weeklyGoal;
   el('settingProgramWeek').value = settings.programWeek || 1;
+  el('settingVoice').checked = settings.voiceAnnouncements !== false;
 }
 
 /* ================= UTIL ================= */

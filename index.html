@@ -58,6 +58,7 @@
 
     <div class="card">
       <div class="card-title">נפח אימון (ק"ג × חזרות) — לאורך זמן</div>
+      <div class="card-hint">נפח = סכום (משקל × חזרות) על פני כל הסטים שהושלמו באימון</div>
       <canvas id="volumeChart" height="180"></canvas>
     </div>
 
@@ -93,6 +94,9 @@
       <label class="field-label">שבוע תוכנית נוכחי (קובע כמה סטים ברירת מחדל לכל תרגיל)</label>
       <input type="number" id="settingProgramWeek" class="input" min="1" max="20" step="1">
       <div class="field-hint">שבוע 1 = סט אחד לתרגיל, שבוע 2 = שני סטים, שבוע 3 ואילך = מלא (לפי הגדרת התרגיל). השינוי חל מיד על האימון הנוכחי ועל אימונים חדשים.</div>
+
+      <label class="checkbox-row"><input type="checkbox" id="settingVoice"> הודעה קולית בסיום מנוחה (באוזניות)</label>
+      <div class="field-hint">עובד רק כשהאפליקציה פתוחה ברקע הפעיל; ב-iOS ייתכן שההודעה לא תושמע אם המסך נעול לגמרי.</div>
 
       <div class="settings-actions">
         <button id="btnExportData" class="btn btn-secondary">ייצוא גיבוי (JSON)</button>
