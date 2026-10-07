@@ -96,6 +96,11 @@ body { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
   color: #fff; font-size: 12px; font-weight: 700; flex-shrink: 0; margin-top: 1px;
 }
 .exercise-head-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.cardio-card { border-color: var(--primary); }
+.cardio-card.done { border-color: #86efac; background: var(--success-soft); }
+.cardio-body { text-align: center; }
+.cardio-timer-display { font-size: 32px; font-weight: 800; letter-spacing: 1px; color: var(--primary); margin: 6px 0 10px; font-variant-numeric: tabular-nums; }
+.cardio-body .settings-actions { justify-content: center; }
 
 .sets-table { width: 100%; border-collapse: collapse; min-width: 420px; }
 .set-table-wrap { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }

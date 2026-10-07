@@ -81,6 +81,12 @@ function init() {
       }
     });
     if (migrated) db.saveExercises(exercises);
+    // add any newly introduced seed exercises (by name) that aren't in the user's saved list yet
+    const missing = SEED_EXERCISES.filter((s) => !exercises.some((ex) => ex.name === s.name));
+    if (missing.length) {
+      exercises = [...exercises, ...missing.map((e) => ({ id: db.uid(), ...e }))];
+      db.saveExercises(exercises);
+    }
   }
   if (settings.restSeconds !== 120) {
     settings.restSeconds = 120;
@@ -88,6 +94,32 @@ function init() {
   }
   if (!activeSession) {
     activeSession = buildDraftSession();
+  } else {
+    // migrate existing active sessions that don't yet have the warm-up/cool-down walk entries
+    let sessionMigrated = false;
+    if (!activeSession.entries.some((e) => e.exerciseId === 'warmup')) {
+      activeSession.entries.unshift(makeCardioEntry('warmup'));
+      sessionMigrated = true;
+    }
+    if (!activeSession.entries.some((e) => e.exerciseId === 'cooldown')) {
+      activeSession.entries.push(makeCardioEntry('cooldown'));
+      sessionMigrated = true;
+    }
+    // add newly introduced exercises to the in-progress session too (before the cool-down walk)
+    exercises.forEach((ex) => {
+      if (!activeSession.entries.some((e) => e.exerciseId === ex.id)) {
+        const cooldownIdx = activeSession.entries.findIndex((e) => e.exerciseId === 'cooldown');
+        const newEntry = {
+          exerciseId: ex.id,
+          exerciseName: ex.name,
+          sets: Array.from({ length: setsForWeek(ex) }, () => ({ weightKg: '', reps: '', completed: false })),
+        };
+        if (cooldownIdx === -1) activeSession.entries.push(newEntry);
+        else activeSession.entries.splice(cooldownIdx, 0, newEntry);
+        sessionMigrated = true;
+      }
+    });
+    if (sessionMigrated) persistActiveSession();
   }
 
   wireTabs();
@@ -95,6 +127,7 @@ function init() {
   wireSettings();
   wireExercisesTab();
   startLiveClock();
+  setInterval(tickCardioTimers, 1000);
 
   renderWorkoutTab();
   renderHistoryTab();
@@ -158,19 +191,29 @@ function buildDraftSession() {
     startedAt: null,
     accumulatedSec: 0,
     running: false,
-    entries: exercises.map((ex) => ({
-      exerciseId: ex.id,
-      exerciseName: ex.name,
-      sets: Array.from({ length: setsForWeek(ex) }, (_, i) => {
-        const last = lastByExercise[ex.id];
-        return {
-          weightKg: last ? last.weightKg : '',
-          reps: last ? last.reps : '',
-          completed: false,
-        };
-      }),
-    })),
+    entries: [
+      makeCardioEntry('warmup'),
+      ...exercises.map((ex) => ({
+        exerciseId: ex.id,
+        exerciseName: ex.name,
+        sets: Array.from({ length: setsForWeek(ex) }, (_, i) => {
+          const last = lastByExercise[ex.id];
+          return {
+            weightKg: last ? last.weightKg : '',
+            reps: last ? last.reps : '',
+            completed: false,
+          };
+        }),
+      })),
+      makeCardioEntry('cooldown'),
+    ],
   };
+}
+
+function makeCardioEntry(kind) {
+  return kind === 'warmup'
+    ? { exerciseId: 'warmup', exerciseName: 'חימום — הליכה', type: 'cardio', durationSec: 300, startedAt: null, completed: false }
+    : { exerciseId: 'cooldown', exerciseName: 'שחרור — הליכה', type: 'cardio', durationSec: 300, startedAt: null, completed: false };
 }
 
 function setsForWeek(ex) {
@@ -240,20 +283,31 @@ function finishWorkout() {
   activeSession.running = false;
   activeSession.accumulatedSec = durationSec;
 
-  const hasCompleted = activeSession.entries.some((e) => e.sets.some((s) => s.completed));
+  const hasCompleted = activeSession.entries.some((e) =>
+    e.type === 'cardio' ? e.completed : e.sets.some((s) => s.completed)
+  );
   if (hasCompleted) {
     const record = {
       id: activeSession.id,
       dateISO: (activeSession.startedAt || new Date().toISOString()),
       finishedAt: new Date().toISOString(),
       durationSec: Math.round(durationSec),
-      entries: activeSession.entries.map((e) => ({
-        exerciseId: e.exerciseId,
-        exerciseName: e.exerciseName,
-        sets: e.sets
-          .filter((s) => s.completed)
-          .map((s) => ({ weightKg: Number(s.weightKg) || 0, reps: Number(s.reps) || 0, completed: true })),
-      })).filter((e) => e.sets.length > 0),
+      entries: activeSession.entries
+        .map((e) => {
+          if (e.type === 'cardio') {
+            return e.completed
+              ? { exerciseId: e.exerciseId, exerciseName: e.exerciseName, type: 'cardio', durationSec: e.durationSec, completed: true }
+              : null;
+          }
+          return {
+            exerciseId: e.exerciseId,
+            exerciseName: e.exerciseName,
+            sets: e.sets
+              .filter((s) => s.completed)
+              .map((s) => ({ weightKg: Number(s.weightKg) || 0, reps: Number(s.reps) || 0, completed: true })),
+          };
+        })
+        .filter((e) => e && (e.type === 'cardio' || e.sets.length > 0)),
     };
     workouts.push(record);
     db.saveWorkouts(workouts);
@@ -280,10 +334,16 @@ function renderWorkoutTab() {
   list.innerHTML = '';
 
   let totalSets = 0, completedSets = 0;
+  let exerciseNumber = 0;
 
-  activeSession.entries.forEach((entry, entryIdx) => {
+  activeSession.entries.forEach((entry) => {
+    if (entry.type === 'cardio') {
+      list.appendChild(renderCardioCard(entry));
+      return;
+    }
     const ex = exercises.find((e) => e.id === entry.exerciseId);
     if (!ex) return;
+    exerciseNumber += 1;
     totalSets += entry.sets.length;
     completedSets += entry.sets.filter((s) => s.completed).length;
 
@@ -294,7 +354,7 @@ function renderWorkoutTab() {
     head.className = 'exercise-card-head';
     head.innerHTML = `
       <div style="display:flex;gap:8px;align-items:flex-start;">
-        <span class="exercise-num">${entryIdx + 1}</span>
+        <span class="exercise-num">${exerciseNumber}</span>
         <div>
           <div class="exercise-name">${escapeHtml(ex.name)}</div>
           <div class="exercise-meta">${escapeHtml(ex.defaultReps)} חזרות &middot; ${escapeHtml(ex.notes || '')}</div>
@@ -398,12 +458,90 @@ function renderWorkoutTab() {
 
 function updateProgress(total, done) {
   if (total === undefined) {
-    total = activeSession.entries.reduce((a, e) => a + e.sets.length, 0);
-    done = activeSession.entries.reduce((a, e) => a + e.sets.filter((s) => s.completed).length, 0);
+    const strengthEntries = activeSession.entries.filter((e) => e.type !== 'cardio');
+    total = strengthEntries.reduce((a, e) => a + e.sets.length, 0);
+    done = strengthEntries.reduce((a, e) => a + e.sets.filter((s) => s.completed).length, 0);
   }
   const pct = total ? Math.round((done / total) * 100) : 0;
   el('setsProgressText').textContent = `${done} / ${total} סטים הושלמו (${pct}%)`;
   el('setsProgressFill').style.width = `${pct}%`;
+}
+
+function renderCardioCard(entry) {
+  const card = document.createElement('div');
+  const isWarmup = entry.exerciseId === 'warmup';
+  card.className = 'exercise-card cardio-card' + (entry.completed ? ' done' : '');
+  const icon = isWarmup ? '🔥' : '🧘';
+  const minutes = Math.round(entry.durationSec / 60);
+  card.innerHTML = `
+    <div class="exercise-card-head">
+      <div style="display:flex;gap:8px;align-items:flex-start;">
+        <span class="exercise-num">${icon}</span>
+        <div>
+          <div class="exercise-name">${escapeHtml(entry.exerciseName)}</div>
+          <div class="exercise-meta">הליכה ${minutes} דקות</div>
+        </div>
+      </div>
+    </div>
+    <div class="cardio-body">
+      <div class="cardio-timer-display" id="cardio-remaining-${entry.exerciseId}">${formatHMS(entry.startedAt ? Math.max(0, entry.durationSec - (Date.now() - entry.startedAt) / 1000) : entry.durationSec)}</div>
+      <div class="settings-actions">
+        <button class="btn btn-secondary btn-small btnCardioStart">${entry.startedAt && !entry.completed ? '⏸ עצור' : '▶ התחל'}</button>
+        <button class="btn btn-secondary btn-small btnCardioReset">↺ איפוס</button>
+        <button class="btn btn-small ${entry.completed ? 'btn-primary' : 'btn-secondary'} btnCardioDone">${entry.completed ? '✓ בוצע' : 'סמן כבוצע'}</button>
+      </div>
+    </div>
+  `;
+  qs('.btnCardioStart', card).addEventListener('click', () => {
+    if (entry.startedAt && !entry.completed) {
+      // pause: bank the elapsed time by shrinking the remaining duration
+      const elapsed = (Date.now() - entry.startedAt) / 1000;
+      entry.durationSec = Math.max(0, entry.durationSec - elapsed);
+      entry.startedAt = null;
+    } else {
+      entry.completed = false;
+      entry.startedAt = Date.now();
+    }
+    persistActiveSession();
+    renderWorkoutTab();
+  });
+  qs('.btnCardioReset', card).addEventListener('click', () => {
+    entry.durationSec = 300;
+    entry.startedAt = null;
+    entry.completed = false;
+    persistActiveSession();
+    renderWorkoutTab();
+  });
+  qs('.btnCardioDone', card).addEventListener('click', () => {
+    entry.completed = !entry.completed;
+    entry.startedAt = null;
+    persistActiveSession();
+    renderWorkoutTab();
+  });
+  return card;
+}
+
+function tickCardioTimers() {
+  if (!activeSession) return;
+  let needsRerender = false;
+  activeSession.entries.forEach((entry) => {
+    if (entry.type !== 'cardio' || !entry.startedAt || entry.completed) return;
+    const remaining = entry.durationSec - (Date.now() - entry.startedAt) / 1000;
+    const span = el(`cardio-remaining-${entry.exerciseId}`);
+    if (remaining <= 0) {
+      entry.completed = true;
+      entry.startedAt = null;
+      persistActiveSession();
+      playBeep();
+      const msg = entry.exerciseId === 'warmup' ? 'החימום הסתיים' : 'השחרור הסתיים';
+      if (settings.voiceAnnouncements) speak(msg);
+      showToast(`${msg} ✅`);
+      needsRerender = true;
+    } else if (span) {
+      span.textContent = formatHMS(remaining);
+    }
+  });
+  if (needsRerender) renderWorkoutTab();
 }
 
 function startRestTimer(ex, exerciseDone) {
@@ -425,8 +563,9 @@ function renderHistoryTab() {
   }
   [...workouts].reverse().forEach((w) => {
     const volume = computeVolume(w);
-    const totalSets = w.entries.reduce((a, e) => a + e.sets.length, 0);
-    const totalExercises = w.entries.length;
+    const strengthEntries = w.entries.filter((e) => e.type !== 'cardio');
+    const totalSets = strengthEntries.reduce((a, e) => a + e.sets.length, 0);
+    const totalExercises = strengthEntries.length;
     const item = document.createElement('div');
     item.className = 'history-item';
     item.innerHTML = `
@@ -446,7 +585,12 @@ function renderHistoryTab() {
         </div>
       </div>
       <div class="history-detail">
-        ${w.entries.map((e) => `
+        ${w.entries.map((e) => e.type === 'cardio' ? `
+          <div class="history-exercise-line">
+            <b>${e.exerciseId === 'warmup' ? '🔥' : '🧘'} ${escapeHtml(e.exerciseName)}</b>
+            <div class="history-sets-line"><div>✅ בוצע (${Math.round(e.durationSec / 60)} דקות)</div></div>
+          </div>
+        ` : `
           <div class="history-exercise-line">
             <b>${escapeHtml(e.exerciseName)}</b>
             <div class="history-sets-line">
@@ -484,7 +628,11 @@ function openEditWorkoutModal(workout) {
     <div class="photo-modal">
       <div class="photo-modal-head"><b>עריכת אימון — ${formatDate(clone.dateISO)}</b><button class="btn-icon btnCloseEditW">✕</button></div>
       <div class="edit-workout-body">
-        ${clone.entries.map((e, ei) => `
+        ${clone.entries.map((e, ei) => e.type === 'cardio' ? `
+          <div class="edit-exercise-block">
+            <div class="edit-exercise-title">${e.exerciseId === 'warmup' ? '🔥' : '🧘'} ${escapeHtml(e.exerciseName)} — ✅ בוצע</div>
+          </div>
+        ` : `
           <div class="edit-exercise-block" data-ei="${ei}">
             <div class="edit-exercise-title">${escapeHtml(e.exerciseName)}</div>
             ${e.sets.map((s, si) => `
@@ -513,7 +661,7 @@ function openEditWorkoutModal(workout) {
     btn.addEventListener('click', () => btn.closest('.edit-set-row').remove());
   });
   qs('.btnSaveEditW', overlay).addEventListener('click', () => {
-    qsa('.edit-exercise-block', overlay).forEach((block) => {
+    qsa('.edit-exercise-block[data-ei]', overlay).forEach((block) => {
       const ei = Number(block.dataset.ei);
       const rows = qsa('.edit-set-row', block);
       clone.entries[ei].sets = rows.map((row) => ({
@@ -522,7 +670,7 @@ function openEditWorkoutModal(workout) {
         completed: true,
       }));
     });
-    clone.entries = clone.entries.filter((e) => e.sets.length > 0);
+    clone.entries = clone.entries.filter((e) => e.type === 'cardio' || e.sets.length > 0);
     workouts = db.getWorkouts().map((w) => (w.id === clone.id ? clone : w));
     db.saveWorkouts(workouts);
     close();
@@ -533,7 +681,10 @@ function openEditWorkoutModal(workout) {
 }
 
 function computeVolume(workout) {
-  return workout.entries.reduce((sum, e) => sum + e.sets.reduce((s2, s) => s2 + (s.weightKg * s.reps), 0), 0);
+  return workout.entries.reduce((sum, e) => {
+    if (e.type === 'cardio' || !e.sets) return sum;
+    return sum + e.sets.reduce((s2, s) => s2 + (s.weightKg * s.reps), 0);
+  }, 0);
 }
 
 function formatDate(iso) {
@@ -831,11 +982,13 @@ function makeSortable(listEl, onReorder) {
 
 function reorderActiveSessionToMatchExercises() {
   if (!activeSession) return;
+  const warmup = activeSession.entries.find((e) => e.exerciseId === 'warmup');
+  const cooldown = activeSession.entries.find((e) => e.exerciseId === 'cooldown');
   const byExId = Object.fromEntries(activeSession.entries.map((e) => [e.exerciseId, e]));
   const reordered = exercises.map((ex) => byExId[ex.id]).filter(Boolean);
   // keep any orphan entries (exercise was deleted) at the end so data isn't lost
-  const orphan = activeSession.entries.filter((e) => !exercises.some((ex) => ex.id === e.exerciseId));
-  activeSession.entries = [...reordered, ...orphan];
+  const orphan = activeSession.entries.filter((e) => e.exerciseId !== 'warmup' && e.exerciseId !== 'cooldown' && !exercises.some((ex) => ex.id === e.exerciseId));
+  activeSession.entries = [warmup, ...reordered, ...orphan, cooldown].filter(Boolean);
   persistActiveSession();
   renderWorkoutTab();
 }

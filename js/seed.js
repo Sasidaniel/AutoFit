@@ -51,4 +51,11 @@ export const SEED_EXERCISES = [
   { name: 'זוקפי גב — פשיטת גב', category: 'בטן / גב תחתון', defaultSets: 3, defaultReps: '15-25', restSeconds: 120,
     notes: 'על הרצפה / בכסא רומי / מכונת היפראקסטנשן',
     images: ['images/p8_2.png', 'images/p8_3.png'] },
+
+  { name: 'פלאנק', category: 'בטן / גב תחתון', defaultSets: 3, defaultReps: '15 שניות החזקה', restSeconds: 120,
+    notes: 'החזקת גוף ישר על האמות ועל קצות האצבעות — ללא תזוזה במשך 15 שניות בכל סט',
+    images: ['images/ex_plank.png'] },
+  { name: 'טרפז — הרמת כתפיים עם משקולות (Shrugs)', category: 'כתפיים', defaultSets: 3, defaultReps: '12-15', restSeconds: 120,
+    notes: 'עומדים ואוחזים משקולות יד בצדי הגוף, מרימים את הכתפיים כלפי מעלה (לכיוון האוזניים) ומורידים בשליטה',
+    images: ['images/ex_shrugs.png'] },
 ];
