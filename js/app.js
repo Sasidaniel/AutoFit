@@ -71,8 +71,16 @@ function init() {
         ex.images = match ? match.images : [];
         migrated = true;
       }
+      if (ex.restSeconds !== 120) {
+        ex.restSeconds = 120;
+        migrated = true;
+      }
     });
     if (migrated) db.saveExercises(exercises);
+  }
+  if (settings.restSeconds !== 120) {
+    settings.restSeconds = 120;
+    db.saveSettings(settings);
   }
   if (!activeSession) {
     activeSession = buildDraftSession();
@@ -670,7 +678,7 @@ function chartBaseOptions() {
 /* ================= EXERCISES TAB ================= */
 function wireExercisesTab() {
   el('btnAddExercise').addEventListener('click', () => {
-    exercises.push({ id: db.uid(), name: 'תרגיל חדש', category: 'כללי', defaultSets: 3, defaultReps: '12-15', restSeconds: 90, notes: '' });
+    exercises.push({ id: db.uid(), name: 'תרגיל חדש', category: 'כללי', defaultSets: 3, defaultReps: '12-15', restSeconds: 120, notes: '' });
     db.saveExercises(exercises);
     renderExercisesTab();
   });
