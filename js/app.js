@@ -426,6 +426,7 @@ function renderHistoryTab() {
   [...workouts].reverse().forEach((w) => {
     const volume = computeVolume(w);
     const totalSets = w.entries.reduce((a, e) => a + e.sets.length, 0);
+    const totalExercises = w.entries.length;
     const item = document.createElement('div');
     item.className = 'history-item';
     item.innerHTML = `
@@ -434,6 +435,7 @@ function renderHistoryTab() {
           <div class="history-date">${formatDate(w.dateISO)}</div>
           <div class="history-sub">
             <span>⏱ ${formatHMS(w.durationSec)}</span>
+            <span>🏋️ ${totalExercises} תרגילים</span>
             <span>🧮 ${totalSets} סטים</span>
             <span>📦 ${Math.round(volume)} ק"ג נפח</span>
           </div>
@@ -760,7 +762,7 @@ function openExerciseEditModal(ex) {
   document.body.appendChild(overlay);
   const close = () => overlay.remove();
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  qs('#btnCloseExEdit', overlay).addEventListener('click', close);
+  qs('.btnCloseExEdit', overlay).addEventListener('click', close);
   qs('#btnCancelExEdit', overlay).addEventListener('click', close);
   qs('#btnSaveExEdit', overlay).addEventListener('click', () => {
     ex.name = qs('#editExName', overlay).value.trim() || ex.name;
