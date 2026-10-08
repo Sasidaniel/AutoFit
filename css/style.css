@@ -200,8 +200,23 @@ body { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
   border-radius: 8px; padding: 9px 10px; font-size: 14px; margin-bottom: 10px;
 }
 .field-label { font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px; }
+.required-mark { color: var(--danger); }
 .field-hint { font-size: 11px; color: var(--text-muted); margin-top: -4px; margin-bottom: 12px; line-height: 1.5; }
 .card-hint { font-size: 11px; color: var(--text-muted); margin-top: -6px; margin-bottom: 10px; }
+
+/* ================= ABOUT / CONTACT TAB ================= */
+.about-desc { font-size: 13px; color: var(--text-muted); line-height: 1.6; margin: 0 0 12px; }
+.about-meta { display: flex; gap: 10px; }
+.about-meta-row {
+  flex: 1; background: var(--surface-alt); border-radius: 10px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted);
+}
+.about-meta-row strong { font-size: 15px; color: var(--text); }
+.contact-email-link {
+  display: inline-block; font-weight: 600; color: var(--primary); text-decoration: none;
+  background: var(--primary-soft); padding: 8px 14px; border-radius: 8px; font-size: 14px;
+}
+.contact-textarea { resize: vertical; min-height: 110px; font-family: inherit; }
 .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--text); margin-bottom: 6px; cursor: pointer; }
 .checkbox-row input { width: 18px; height: 18px; }
 .settings-actions { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }

@@ -116,17 +116,17 @@
   <section id="tab-profile" class="tab-panel">
     <h2 class="section-title">אזור אישי</h2>
     <div class="card">
-      <label class="field-label">שם המתאמן</label>
-      <input class="input" id="profileName" placeholder="לדוגמה: ששי דניאל">
+      <label class="field-label">שם המתאמן <span class="required-mark">*</span></label>
+      <input class="input" id="profileName">
 
       <label class="field-label">גיל</label>
-      <input type="number" min="1" class="input" id="profileAge" placeholder="גיל">
+      <input type="number" min="1" class="input" id="profileAge">
 
       <label class="field-label">גובה (ס"מ)</label>
-      <input type="number" min="1" class="input" id="profileHeight" placeholder="גובה בס&quot;מ">
+      <input type="number" min="1" class="input" id="profileHeight">
 
       <label class="field-label">משקל (ק"ג)</label>
-      <input type="number" min="1" step="0.1" class="input" id="profileWeight" placeholder="משקל בק&quot;ג">
+      <input type="number" min="1" step="0.1" class="input" id="profileWeight">
 
       <div class="settings-actions">
         <button id="btnSaveProfile" class="btn btn-primary">שמור</button>
@@ -168,6 +168,46 @@
     </div>
   </section>
 
+  <!-- CONTACT TAB -->
+  <section id="tab-contact" class="tab-panel">
+    <h2 class="section-title">יצירת קשר ואודות</h2>
+
+    <div class="card">
+      <div class="card-title">📱 AutoFit — מעקב אימוני כוח</div>
+      <p class="about-desc">אפליקציית מעקב כושר אישית לאימוני כוח: ניהול תרגילים, סטים וחזרות, טיימר מנוחה ואימון, היסטוריה ודשבורד התקדמות. זמינה גם כאפליקציית iPhone עם חיבור ל-Apple Health, גיבוי iCloud ונעילת Face ID.</p>
+      <div class="about-meta">
+        <div class="about-meta-row"><span>גרסה</span><strong id="aboutVersion">1.0.0</strong></div>
+        <div class="about-meta-row"><span>תאריך יצירה</span><strong id="aboutCreated">2026</strong></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">✉️ פרטי יצירת קשר</div>
+      <p class="about-desc">לשאלות, תקלות או הצעות לשיפור — ניתן לפנות ישירות במייל:</p>
+      <a id="contactEmailLink" href="mailto:sasid5000@gmail.com" class="contact-email-link">sasid5000@gmail.com</a>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📝 שליחת פנייה</div>
+      <label class="field-label">שם</label>
+      <input class="input" id="contactName" placeholder="השם שלך">
+
+      <label class="field-label">טלפון</label>
+      <input type="tel" class="input" id="contactPhone" placeholder="מספר טלפון">
+
+      <label class="field-label">תקציר</label>
+      <input class="input" id="contactSummary" placeholder="נושא הפנייה בקצרה">
+
+      <label class="field-label">בקשה</label>
+      <textarea class="input contact-textarea" id="contactMessage" placeholder="פרטי הפנייה..." rows="6"></textarea>
+
+      <div class="settings-actions">
+        <button id="btnSendContact" class="btn btn-primary">📤 שלח</button>
+      </div>
+      <div class="field-hint">הלחיצה על שליחה תפתח את אפליקציית המייל שלך עם הפנייה מוכנה לשליחה אליי.</div>
+    </div>
+  </section>
+
 </main>
 
 <!-- REST TIMER BAR (floating, non-blocking — the app stays usable while resting) -->
@@ -190,6 +230,7 @@
   <button class="tab-btn" data-tab="exercises"><span>📋</span><span>תרגילים</span></button>
   <button class="tab-btn" data-tab="profile"><span>👤</span><span>אישי</span></button>
   <button class="tab-btn" data-tab="settings"><span>⚙️</span><span>הגדרות</span></button>
+  <button class="tab-btn" data-tab="contact"><span>✉️</span><span>יצירת קשר</span></button>
 </nav>
 
 <div id="toast" class="toast hidden"></div>

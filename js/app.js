@@ -168,6 +168,7 @@ function init() {
   wireExercisesTab();
   wireProfileTab();
   wireHistoryTab();
+  wireContactTab();
   renderBrand();
   startLiveClock();
   setInterval(tickCardioTimers, 1000);
@@ -1785,13 +1786,32 @@ function renderSettingsTab() {
 /* ================= PERSONAL AREA TAB ================= */
 function wireProfileTab() {
   el('btnSaveProfile').addEventListener('click', () => {
-    profile.name = el('profileName').value.trim();
+    const name = el('profileName').value.trim();
+    if (!name) { showToast('שם המתאמן הוא שדה חובה'); return; }
+    profile.name = name;
     profile.age = el('profileAge').value;
     profile.heightCm = el('profileHeight').value;
     profile.weightKg = el('profileWeight').value;
     db.saveProfile(profile);
     renderBrand();
     showToast('הפרטים האישיים נשמרו ✅');
+  });
+}
+
+/* ================= CONTACT TAB ================= */
+const CONTACT_EMAIL = 'sasid5000@gmail.com';
+function wireContactTab() {
+  el('btnSendContact').addEventListener('click', () => {
+    const name = el('contactName').value.trim();
+    const phone = el('contactPhone').value.trim();
+    const summary = el('contactSummary').value.trim();
+    const message = el('contactMessage').value.trim();
+    if (!name || !message) { showToast('נא למלא שם ובקשה לפני שליחה'); return; }
+    const subject = summary || `פנייה חדשה מ-${name}`;
+    const body = `שם: ${name}\nטלפון: ${phone || '-'}\n\nבקשה:\n${message}`;
+    const mailto = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailto;
+    showToast('נפתחת אפליקציית המייל לשליחה ✉️');
   });
 }
 function renderProfileTab() {
